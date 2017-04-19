@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package >
+  <metadata>
+    <id>$id$</id>
+    <version>$version$</version>
+    <title>$title$</title>
+    <authors>$author$</authors>
+    <owners>$author$</owners>
+    <licenseUrl>https://github.com/dagmatic/akka.net/blob/master/LICENSE</licenseUrl>
+    <projectUrl>https://github.com/dagmatic/akka.net</projectUrl>
+    <iconUrl><![CDATA[https://avatars1.githubusercontent.com/u/27751635?v=3&s=200]]></iconUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <description>$description$</description>
+    <releaseNotes>First release.</releaseNotes>
+    <copyright>Copyright 2017</copyright>
+    <tags>akka akka.net workflow reactive behavior tree dagmatic</tags>
+    @dependencies@
+  </metadata>
+</package>
