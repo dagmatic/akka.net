@@ -4,6 +4,8 @@ Workflows for [akka.net](https://github.com/akkadotnet/akka.net)
 
 [![Build Status](https://travis-ci.org/dagmatic/akka.net.svg?branch=master)](https://travis-ci.org/dagmatic/akka.net)
 
+Get on [NuGet](https://www.nuget.org/packages/Dagmatic.Akka/)
+
 ```csharp
 public class ToyTest : BT<object>
 {
