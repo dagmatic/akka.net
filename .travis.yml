@@ -13,3 +13,6 @@ install:
 script:
   - xbuild /p:Configuration=${BUILD_CONFIG} ./src/Dagmatic.Akka.sln
   - mono ./testrunner/xunit.runner.console.${XUNIT_RUNNER_V}/tools/xunit.console.exe ./src/Actor.Tests/bin/${BUILD_CONFIG}/Dagmatic.Akka.Actor.Tests.dll
+
+notifications:
+  email: false
