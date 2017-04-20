@@ -1,5 +1,4 @@
-# akka.net
-Workflows for [![akka.net](https://github.com/akkadotnet/akka.net/blob/dev/documentation/icons/AkkaNetLogo.Normal.png)](https://github.com/akkadotnet/akka.net)
+Workflows for [akka.net](https://github.com/akkadotnet/akka.net)
 
 [![Build Status](https://travis-ci.org/dagmatic/akka.net.svg?branch=master)](https://travis-ci.org/dagmatic/akka.net)
 
