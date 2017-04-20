@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package >
   <metadata>
-    <id>$id$</id>
+    <id>Dagmatic.Akka</id>
     <version>$version$</version>
     <title>$title$</title>
     <authors>$author$</authors>
@@ -14,6 +14,5 @@
     <releaseNotes>First release.</releaseNotes>
     <copyright>Copyright 2017</copyright>
     <tags>akka akka.net workflow reactive behavior tree dagmatic</tags>
-    @dependencies@
   </metadata>
 </package>

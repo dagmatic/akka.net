@@ -4,11 +4,11 @@ using System.Runtime.InteropServices;
 // General Information about an assembly is controlled through the following 
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
-[assembly: AssemblyTitle("Dagmatic Akka Actors")]
-[assembly: AssemblyDescription("Workflows for Akka.Net")]
+[assembly: AssemblyTitle("Dagmatic workflows for akka.net")]
+[assembly: AssemblyDescription("Dagmatic Akka")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("Dagmatic")]
-[assembly: AssemblyProduct("Dagmatic.Akka.Actors")]
+[assembly: AssemblyProduct("Dagmatic.Akka.Actor")]
 [assembly: AssemblyCopyright("Copyright ©  2017")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
