@@ -1,2 +1,9 @@
 language: csharp
 solution: ./src/Dagmatic.Akka/Dagmatic.Akka.sln
+
+install:
+  - nuget restore ./src/Dagmatic.Akka/Dagmatic.Akka.sln
+  - nuget install xunit.runners -Version 1.9.2 -OutputDirectory testrunner
+script:
+  - xbuild /p:Configuration=Release ./src/Dagmatic.Akka/Dagmatic.Akka.sln
+  - mono ./testrunner/xunit.runners.1.9.2/tools/xunit.console.clr4.exe ./src/Dagmatic.Akka/Actor.Tests/bin/Debug/Dagmatic.Akka.Actor.Tests.dll
