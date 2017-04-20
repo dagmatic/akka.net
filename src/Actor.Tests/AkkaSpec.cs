@@ -14,7 +14,6 @@ using Akka.Actor;
 using Akka.Configuration;
 using Akka.TestKit.Internal.StringMatcher;
 using Akka.TestKit.TestEvent;
-using Akka.Util;
 using Akka.Util.Internal;
 using Xunit;
 using Xunit.Abstractions;
@@ -28,6 +27,7 @@ namespace Akka.TestKit
         private static Regex _nameReplaceRegex = new Regex("[^a-zA-Z0-9]", RegexOptions.Compiled);
         private static readonly Config _akkaSpecConfig = ConfigurationFactory.ParseString(@"
           akka {
+            suppress-json-serializer-warning = on
             loglevel = WARNING
             stdout-loglevel = WARNING
             serialize-messages = on
@@ -101,13 +101,13 @@ namespace Akka.TestKit
         }
 
         public static Config AkkaSpecConfig { get { return _akkaSpecConfig; } }
-        
+
         protected T ExpectMsgPf<T>(TimeSpan? timeout, string hint, Func<object, T> function)
         {
             MessageEnvelope envelope;
             var success = TryReceiveOne(out envelope, timeout);
 
-            if(!success)
+            if (!success)
                 Assertions.Fail(string.Format("expected message of type {0} but timed out after {1}", typeof(T), GetTimeoutOrDefault(timeout)));
             var message = envelope.Message;
             Assertions.AssertTrue(message != null, string.Format("expected {0} but got null message", hint));
@@ -138,7 +138,7 @@ namespace Akka.TestKit
             {
                 actionThatThrows();
             }
-            catch(Exception)
+            catch (Exception)
             {
                 return;
             }
