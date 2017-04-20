@@ -1,5 +1,5 @@
 language: csharp
-solution: ./src/Dagmatic.Akka/Dagmatic.Akka.sln
+solution: ./src/Dagmatic.Akka.sln
 
 env:
   global:
@@ -8,8 +8,8 @@ env:
         
 
 install:
-  - nuget restore ./src/Dagmatic.Akka/Dagmatic.Akka.sln
+  - nuget restore ./src/Dagmatic.Akka.sln
   - nuget install xunit.runner.console -Version ${XUNIT_RUNNER_V} -OutputDirectory testrunner
 script:
-  - xbuild /p:Configuration=${BUILD_CONFIG} ./src/Dagmatic.Akka/Dagmatic.Akka.sln
-  - mono ./testrunner/xunit.runner.console.${XUNIT_RUNNER_V}/tools/xunit.console.exe ./src/Dagmatic.Akka/Actor.Tests/bin/${BUILD_CONFIG}/Dagmatic.Akka.Actor.Tests.dll
+  - xbuild /p:Configuration=${BUILD_CONFIG} ./src/Dagmatic.Akka.sln
+  - mono ./testrunner/xunit.runner.console.${XUNIT_RUNNER_V}/tools/xunit.console.exe ./src/Actor.Tests/bin/${BUILD_CONFIG}/Dagmatic.Akka.Actor.Tests.dll
