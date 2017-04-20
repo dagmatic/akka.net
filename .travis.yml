@@ -12,4 +12,4 @@ install:
   - nuget install xunit.runner.console -Version ${XUNIT_RUNNER_V} -OutputDirectory testrunner
 script:
   - xbuild /p:Configuration=${BUILD_CONFIG} ./src/Dagmatic.Akka/Dagmatic.Akka.sln
-  - mono ./src/Dagmatic.Akka/packages/xunit.runner.console.${XUNIT_RUNNER_V}/tools/xunit.console.exe ./src/Dagmatic.Akka/Actor.Tests/bin/${BUILD_CONFIG}/Dagmatic.Akka.Actor.Tests.dll
+  - mono ./testrunner/xunit.runner.console.${XUNIT_RUNNER_V}/tools/xunit.console.exe ./src/Dagmatic.Akka/Actor.Tests/bin/${BUILD_CONFIG}/Dagmatic.Akka.Actor.Tests.dll
