@@ -1,9 +1,14 @@
 language: csharp
 solution: ./src/Dagmatic.Akka/Dagmatic.Akka.sln
 
+env:
+  global:
+    BUILD_CONFIG=Release
+        
+
 install:
   - nuget restore ./src/Dagmatic.Akka/Dagmatic.Akka.sln
   - nuget install xunit.runners -Version 1.9.2 -OutputDirectory testrunner
 script:
-  - xbuild /p:Configuration=Release ./src/Dagmatic.Akka/Dagmatic.Akka.sln
-  - mono ./testrunner/xunit.runners.1.9.2/tools/xunit.console.clr4.exe ./src/Dagmatic.Akka/Actor.Tests/bin/Debug/Dagmatic.Akka.Actor.Tests.dll
+  - xbuild /p:Configuration=${BUILD_CONFIG} ./src/Dagmatic.Akka/Dagmatic.Akka.sln
+  - mono ./testrunner/xunit.runners.1.9.2/tools/xunit.console.clr4.exe ./src/Dagmatic.Akka/Actor.Tests/bin/${BUILD_CONFIG}/Dagmatic.Akka.Actor.Tests.dll
