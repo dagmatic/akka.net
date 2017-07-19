@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 
 namespace Dagmatic.Akka.Actor
@@ -13,35 +15,40 @@ namespace Dagmatic.Akka.Actor
             Machine.ProcessMessage(message);
         }
 
-        protected GoalMachine.ActionG Execute(Action<GoalMachine.IContext> action)
+        protected GoalMachine.IGoal Become(Func<GoalMachine.IGoal> factory)
+            => new GoalMachine.FromActionFactoryG(() => ctx => ctx.ReplaceRoot(factory()));
+
+        protected GoalMachine.IGoal Spawn(GoalMachine.IGoal goal)
+            => new GoalMachine.FromFuncG(ctx =>
+            {
+                ctx.IsRoot = true;
+                ctx.ReplaceSelf(goal);
+                return GoalStatus.Pending;
+            });
+
+        protected GoalMachine.ActionG Execute(Action<GoalMachine.IGoalContext> action)
             => new GoalMachine.ActionG(action);
+
+        protected GoalMachine.FromActionFactoryG FromAction(Action<GoalMachine.IGoalContext> action, bool failOnException = true)
+            => new GoalMachine.FromActionFactoryG(() => action, failOnException);
+
+        protected GoalMachine.FromFuncG FromFunction(Func<GoalMachine.IGoalContext, GoalStatus> func)
+            => new GoalMachine.FromFuncG(func);
 
         protected GoalMachine.IfG If(GoalMachine.IGoal cond, GoalMachine.IGoal @then = null, GoalMachine.IGoal @else = null)
             => new GoalMachine.IfG(cond, @then, @else);
 
-        protected GoalMachine.IfG If(Func<GoalMachine.IContext, bool> pred, GoalMachine.IGoal @then = null, GoalMachine.IGoal @else = null)
+        protected GoalMachine.IfG If(Func<GoalMachine.IGoalContext, bool> pred, GoalMachine.IGoal @then = null, GoalMachine.IGoal @else = null)
             => new GoalMachine.IfG(Condition(pred), @then, @else);
 
-        protected GoalMachine.ConditionG Condition(Func<GoalMachine.IContext, bool> pred)
+        protected GoalMachine.ConditionG Condition(Func<GoalMachine.IGoalContext, bool> pred)
             => new GoalMachine.ConditionG(pred);
 
-        protected GoalMachine.WhenG When(Func<GoalMachine.IContext, bool> pred)
-            => new GoalMachine.WhenG(pred);
-
-        protected GoalMachine.IGoal ReceiveAny(GoalMachine.IGoal child = null)
-            => And(When(ctx => ctx.CurrentMessage != null), child ?? Ok());
+        protected GoalMachine.WhenG When(Func<GoalMachine.IGoalContext, bool> pred, GoalMachine.IGoal goal = null)
+            => new GoalMachine.WhenG(pred, goal);
 
         protected GoalMachine.AndG And(GoalMachine.IGoal goal1, GoalMachine.IGoal goal2)
             => new GoalMachine.AndG(goal1, goal2);
-
-        protected GoalMachine.IGoal ReceiveAny(Func<object, bool> shouldHandle, GoalMachine.IGoal child = null)
-            => And(When(ctx => ctx.CurrentMessage != null && shouldHandle(ctx.CurrentMessage)), child ?? Ok());
-
-        protected GoalMachine.IGoal Receive<T>(GoalMachine.IGoal child = null)
-            => ReceiveAny(msg => msg is T, child);
-
-        protected GoalMachine.IGoal Receive<T>(Func<T, bool> shouldHandle, GoalMachine.IGoal child = null)
-            => ReceiveAny(msg => msg is T && shouldHandle((T)msg), child);
 
         protected GoalMachine.SequenceG Sequence(Func<IEnumerable<GoalStatus>, GoalStatus> pred, params GoalMachine.IGoal[] children)
             => new GoalMachine.SequenceG(pred, children);
@@ -58,25 +65,25 @@ namespace Dagmatic.Akka.Actor
         protected GoalMachine.SequenceG AllComplete(params GoalMachine.IGoal[] children)
             => Sequence(GoalEx.AllComplete, children);
 
-        protected GoalMachine.WhileActionG Loop(Action<GoalMachine.IContext> action)
+        protected GoalMachine.WhileActionG Loop(Action<GoalMachine.IGoalContext> action)
             => While(_ => true, action);
 
-        protected GoalMachine.UntilG Loop(Func<GoalMachine.IContext, GoalMachine.IGoal> body)
+        protected GoalMachine.UntilG Loop(GoalMachine.IGoal body)
             => Until(When(_ => false), body);
 
-        protected GoalMachine.UntilG Forever(Func<GoalMachine.IContext, GoalMachine.IGoal> body)
+        protected GoalMachine.UntilG Forever(GoalMachine.IGoal body)
             => Until(When(_ => false), body, false);
 
-        protected GoalMachine.UntilG While(Func<GoalMachine.IContext, bool> pred, Func<GoalMachine.IContext, GoalMachine.IGoal> body)
+        protected GoalMachine.UntilG While(Func<GoalMachine.IGoalContext, bool> pred, GoalMachine.IGoal body)
             => Until(When(ctx => !pred(ctx)), body);
 
-        protected GoalMachine.WhileActionG Forever(Action<GoalMachine.IContext> action)
+        protected GoalMachine.WhileActionG Forever(Action<GoalMachine.IGoalContext> action)
             => While(_ => true, action, false);
 
-        protected GoalMachine.WhileActionG While(Func<GoalMachine.IContext, bool> pred, Action<GoalMachine.IContext> action, bool failOnException = true)
+        protected GoalMachine.WhileActionG While(Func<GoalMachine.IGoalContext, bool> pred, Action<GoalMachine.IGoalContext> action, bool failOnException = true)
             => new GoalMachine.WhileActionG(pred, action);
 
-        protected GoalMachine.UntilG Until(GoalMachine.IGoal pred, Func<GoalMachine.IContext, GoalMachine.IGoal> body, bool failOnBodyFailure = true)
+        protected GoalMachine.UntilG Until(GoalMachine.IGoal pred, GoalMachine.IGoal body, bool failOnBodyFailure = true)
             => new GoalMachine.UntilG(pred, body, failOnBodyFailure);
 
         protected GoalMachine.NotG Not(GoalMachine.IGoal child)
@@ -91,31 +98,25 @@ namespace Dagmatic.Akka.Actor
         protected GoalMachine.IGoal After(GoalMachine.IGoal child, GoalMachine.IGoal after)
             => Then(child, after);
 
-        protected GoalMachine.NextMessageG NextMessage(GoalMachine.IGoal goal, Func<GoalMachine.IContext, bool> pred = null)
+        protected GoalMachine.NextMessageG NextMessage(GoalMachine.IGoal goal = null, Func<GoalMachine.IGoalContext, bool> pred = null)
             => new GoalMachine.NextMessageG(goal, pred);
 
-        protected GoalMachine.NextMessageG NextMessage(Func<object, bool> pred, GoalMachine.IGoal goal)
+        protected GoalMachine.NextMessageG NextMessage(Func<object, bool> pred, GoalMachine.IGoal goal = null)
             => NextMessage(goal, ctx => pred(ctx.CurrentMessage));
 
-        protected GoalMachine.NextMessageG NextMessage<T>(GoalMachine.IGoal goal)
+        protected GoalMachine.NextMessageG NextMessage<T>(GoalMachine.IGoal goal = null)
             => NextMessage(goal, ctx => ctx.CurrentMessage is T);
 
-        protected GoalMachine.NextMessageG NextMessage<T>(Func<T, bool> pred, GoalMachine.IGoal goal)
+        protected GoalMachine.NextMessageG NextMessage<T>(Func<T, bool> pred, GoalMachine.IGoal goal = null)
             => NextMessage(goal, ctx => ctx.CurrentMessage is T && pred((T)ctx.CurrentMessage));
 
         protected GoalMachine.ThenG Then(GoalMachine.IGoal child, GoalMachine.IGoal then)
             => new GoalMachine.ThenG(child, then);
 
-        protected GoalMachine.BecomeG Become(Func<GoalMachine.IGoal> factory)
-            => new GoalMachine.BecomeG(factory);
-
-        protected GoalMachine.SpawnG Spawn(GoalMachine.IGoal child)
-            => new GoalMachine.SpawnG(child);
-
         protected GoalMachine.TimeoutG Timeout(TimeSpan delay, GoalMachine.IGoal child, GoalMachine.IGoal onTimeout = null)
             => new GoalMachine.TimeoutG(_ => delay, child, onTimeout ?? Fail());
 
-        protected GoalMachine.TimeoutG Timeout(Func<GoalMachine.IContext, TimeSpan> delay, GoalMachine.IGoal child, GoalMachine.IGoal onTimeout = null)
+        protected GoalMachine.TimeoutG Timeout(Func<GoalMachine.IGoalContext, TimeSpan> delay, GoalMachine.IGoal child, GoalMachine.IGoal onTimeout = null)
             => new GoalMachine.TimeoutG(delay, child, onTimeout ?? Fail());
 
         protected GoalMachine.NeverG Never()
@@ -124,7 +125,7 @@ namespace Dagmatic.Akka.Actor
         protected GoalMachine.IGoal Delay(TimeSpan delay, GoalMachine.IGoal after = null)
             => Delay(_ => delay, after ?? Ok());
 
-        protected GoalMachine.IGoal Delay(Func<GoalMachine.IContext, TimeSpan> delay, GoalMachine.IGoal after = null)
+        protected GoalMachine.IGoal Delay(Func<GoalMachine.IGoalContext, TimeSpan> delay, GoalMachine.IGoal after = null)
             => new GoalMachine.TimeoutG(delay, Never(), after ?? Ok());
 
         protected GoalMachine.OkG Ok()
@@ -133,265 +134,376 @@ namespace Dagmatic.Akka.Actor
 
         protected void StartWith(GoalMachine.IGoal goal, TData data)
         {
-            Machine = new GoalMachine(data, this);
+            Machine = new GoalMachine(this, data);
             Machine.Run(goal);
         }
 
         public class GoalMachine
         {
-            private List<GoalWrapper> _goals = new List<GoalWrapper>();
+            private List<GoalContext> _contexts = new List<GoalContext>();
 
-            public GoalMachine(TData data, IMachineHost host)
+            public GoalMachine(IMachineHost host, TData data)
             {
-                Data = data;
                 Host = host;
+                Data = data;
             }
 
-            public TData Data { get; }
             public IMachineHost Host { get; }
             public object CurrentMessage { get; private set; }
             public ulong MessageCount { get; private set; }
+            public TData Data { get; }
 
             public void ProcessMessage(object message)
             {
                 MessageCount++;
                 CurrentMessage = message;
 
-                foreach (var goal in _goals.ToList())
+                foreach (var context in _contexts)
                 {
-                    RunWrapper(goal);
+                    GoalContext.Run(context);
                 }
             }
 
             public void Run(IGoal goal)
             {
-                var wrapper = new GoalWrapper(goal);
-                _goals.Add(wrapper);
-
-                RunWrapper(wrapper);
-            }
-
-            private void RunWrapper(GoalWrapper goal)
-            {
-                var ctx = new Context(CurrentMessage, Data, Host, MessageCount);
-
-                goal.Next(ctx);
-
-                if (goal.Status == GoalStatus.Pending)
-                    return;
-
-                if (goal.Status == GoalStatus.Failure)
-                    Failed?.Invoke(this, goal);
-
-                _goals.Remove(goal);
+                var context = new GoalContext(this, goal);
+                _contexts.Add(context);
+                GoalContext.Run(context);
             }
 
             public event EventHandler<IGoal> Failed;
 
-            private class GoalWrapper : GoalBase
-            {
-                public IGoal Goal;
-                private GoalWrapper _root;
-
-                public GoalWrapper(IGoal goal, GoalWrapper root = null)
-                {
-                    Goal = goal;
-                    _root = root ?? this;
-                    Status = goal.Status;
-                }
-
-                private GoalWrapper Become(Func<IGoal> factory)
-                {
-                    if (this == _root)
-                    {
-                        Goal = factory();
-                        Status = Goal.Status;
-
-                        return this;
-                    }
-                    else
-                    {
-                        Status = GoalStatus.Success;
-                        return _root.Become(factory);
-                    }
-                }
-
-                public override IGoal Next(IContext ctx)
-                {
-                    if (Status == GoalStatus.Pending)
-                    {
-                        var curr = Goal;
-                        while (Goal.Status == GoalStatus.Pending && curr != null)
-                        {
-                            try
-                            {
-                                Goal = curr;
-                                curr = curr.Next(ctx);
-
-                                var become = Goal as BecomeG;
-                                if (become != null)
-                                {
-                                    var wrapper = Become(become.Factory);
-                                    if (wrapper != this)
-                                    {
-                                        wrapper.Next(ctx);
-                                    }
-                                }
-
-                                var spawn = Goal as SpawnG;
-                                if (spawn != null)
-                                {
-                                    Goal = new GoalWrapper(spawn.Child);
-                                    curr = Goal;
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                Goal = new ExceptionG(ex, Goal);
-                            }
-                        }
-
-                        Status = Goal.Status;
-                    }
-
-                    return null;
-                }
-            }
-
-            public interface IContext
+            public interface IGoalContext
             {
                 object CurrentMessage { get; }
-
-                TData Data { get; }
-
                 IMachineHost Host { get; }
                 ulong MessageCount { get; }
+                IGoal Parent { get; }
+                TData Data { get; }
+                IReadOnlyDictionary<int, IGoal> Children { get; }
+                IReadOnlyDictionary<int, GoalStatus> ChildStats { get; }
+                GoalStatus Status { get; set; }
+                object FailureReason { get; set; }
+                bool IsRoot { get; set; }
+                void SetChildren(params IGoal[] children);
+                void ReplaceRoot(IGoal goal);
+                void ReplaceSelf(IGoal goal);
+                void Spawn(IGoal goal);
             }
 
-            public struct Context : IContext
+            public class GoalContext : IGoalContext
             {
-                public Context(object message, TData data, IMachineHost host, ulong messageCount)
+                private class ReadonlyListDictionary<C, T> : IReadOnlyDictionary<int, T>
                 {
-                    CurrentMessage = message;
-                    Data = data;
-                    Host = host;
-                    MessageCount = messageCount;
+                    private List<C> _container;
+                    private Func<C, T> _selector;
+                    public ReadonlyListDictionary(List<C> container, Func<C, T> selector)
+                    {
+                        _container = container;
+                        _selector = selector;
+                    }
+
+                    public T this[int key] => _selector(_container[key]);
+
+                    public int Count => _container.Count;
+
+                    public IEnumerable<int> Keys => Enumerable.Range(0, _container.Count);
+
+                    public IEnumerable<T> Values => _container.Select(_selector);
+
+                    public bool ContainsKey(int key) => _container.Count > key && key >= 0;
+
+                    public IEnumerator<KeyValuePair<int, T>> GetEnumerator() => _container.Select((v, i) => new KeyValuePair<int, T>(i, _selector(v))).GetEnumerator();
+
+                    public bool TryGetValue(int key, out T value)
+                    {
+                        if (ContainsKey(key))
+                        {
+                            value = this[key];
+                            return true;
+                        }
+
+                        value = default(T);
+                        return false;
+                    }
+
+                    IEnumerator IEnumerable.GetEnumerator()
+                    {
+                        return GetEnumerator();
+                    }
                 }
 
-                public object CurrentMessage { get; }
+                private GoalMachine _machine;
 
+                public GoalContext(GoalMachine machine, IGoal goal, GoalContext parent = null)
+                {
+                    _machine = machine;
+                    Goal = goal;
+                    Goal.Initialize();
+                    ChildContexts = new List<GoalContext>();
+                    Children = new ReadonlyListDictionary<GoalContext, IGoal>(ChildContexts, c => c.Goal);
+                    ChildStats = new ReadonlyListDictionary<GoalContext, GoalStatus>(ChildContexts, c => c.Status);
+                    Data = machine.Data;
+                    ParentContext = parent;
+                }
+
+                public object CurrentMessage => _machine.CurrentMessage;
+                public IMachineHost Host => _machine.Host;
+                public ulong MessageCount => _machine.MessageCount;
+                public IGoal Parent { get; }
+                public GoalContext ParentContext { get; }
+                public IGoal Goal { get; protected set; }
                 public TData Data { get; }
+                public GoalStatus Status { get; set; }
+                public object FailureReason { get; set; }
+                public IReadOnlyDictionary<int, IGoal> Children { get; }
+                public IReadOnlyDictionary<int, GoalStatus> ChildStats { get; }
+                public List<GoalContext> ChildContexts { get; protected set; }
+                public bool IsRoot { get; set; }
+                public IEnumerable<IGoal> ReplacedChildren { get; protected set; }
+                public IGoal ReplacedRoot { get; protected set; }
+                public IGoal ReplacedSelf { get; protected set; }
+                public ImmutableDictionary<IGoal, GoalContext> ContextLookup { get; protected set; }
+                public ImmutableList<IGoal> SpawnedGoals { get; set; } = ImmutableList<IGoal>.Empty;
 
-                public IMachineHost Host { get; }
-                public ulong MessageCount { get; }
+                public void SetChildren(params IGoal[] children)
+                {
+                    ReplacedChildren = children;
+                }
+
+                public void ReplaceRoot(IGoal goal)
+                {
+                    ReplacedRoot = goal;
+                }
+
+                public void ReplaceSelf(IGoal goal)
+                {
+                    ReplacedSelf = goal;
+                }
+
+                public void Spawn(IGoal goal)
+                {
+                    SpawnedGoals = SpawnedGoals.Add(goal);
+                }
+
+                public void ReplaceGoal(IGoal goal)
+                {
+                    Goal = goal;
+                    Goal.Initialize();
+                    ReplacedRoot = null;
+                    ReplacedSelf = null;
+                    ChildContexts.Clear();
+                }
+
+                public void ReplaceChildren()
+                {
+                    ChildContexts.Clear();
+                    ChildContexts.AddRange(ReplacedChildren.Select(h => new GoalContext(_machine, h, this)));
+                    ReplacedChildren = null;
+                }
+
+                public void SpawnGoals()
+                {
+                    ChildContexts.AddRange(SpawnedGoals.Select(h => new GoalContext(_machine, h, this) { IsRoot = true }));
+                    SpawnedGoals = ImmutableList<IGoal>.Empty;
+                }
+
+                public static void Run(GoalContext ctx)
+                {
+                    var stack = new Stack<ImmutableList<GoalContext>>();
+                    stack.Push(ImmutableList<GoalContext>.Empty.Add(ctx));
+
+                    while (stack.Count > 0)
+                    {
+                        var children = stack.Pop();
+
+                        nextchildcheck:
+
+                        while (children.Count > 0)
+                        {
+                            var child = children[0];
+
+                            children = children.RemoveAt(0);
+
+                            pendingcheck:
+
+                            while (child.Status == GoalStatus.Pending)
+                            {
+                                var pendingChildren = ImmutableList<GoalContext>.Empty.AddRange(child.ChildContexts.Where(c => c.Status == GoalStatus.Pending));
+
+                                if (pendingChildren.Count == 0)
+                                {
+                                    child.Goal.Update(child);
+                                }
+                                else
+                                {
+                                    stack.Push(children);
+                                    children = pendingChildren;
+
+                                    goto nextchildcheck;
+                                }
+
+                                var childUpdated = false;
+
+                                completecheck:
+
+                                if (child.Status != GoalStatus.Pending)
+                                {
+                                    if (child.ParentContext != null)
+                                    {
+                                        children = stack.Pop();
+
+                                        child = child.ParentContext;
+
+                                        child.Goal.Update(child);
+
+                                        childUpdated = true;
+
+                                        goto completecheck;
+                                    }
+
+                                    goto nextchildcheck;
+                                }
+
+                                if (child.ReplacedRoot != null)
+                                {
+                                    var replacedRoot = child.ReplacedRoot;
+                                    child.ReplacedRoot = null;
+
+                                    while (stack.Count > 0 && child.ParentContext != null && child.IsRoot == false)
+                                    {
+                                        child = child.ParentContext;
+                                        children = stack.Pop();
+                                    }
+
+                                    child.ReplaceGoal(replacedRoot);
+                                }
+                                else if (child.ReplacedSelf != null)
+                                {
+                                    child.ReplaceGoal(child.ReplacedSelf);
+                                }
+                                else if (child.ReplacedChildren != null)
+                                {
+                                    child.ReplaceChildren();
+                                }
+                                else if (child.SpawnedGoals.IsEmpty == false)
+                                {
+                                    child.SpawnGoals();
+                                }
+                                else
+                                {
+                                    if (childUpdated)
+                                        goto pendingcheck;
+
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             public interface IGoal
             {
-                GoalStatus Status { get; }
-
-                IGoal Next(IContext ctx);
-
-                object FailureReason { get; }
-            }
-
-            public class BecomeG : GoalBase
-            {
-                public BecomeG(Func<IGoal> factory)
-                {
-                    Factory = factory;
-                }
-
-                public Func<IGoal> Factory { get; }
-
-                public override GoalStatus Status => GoalStatus.Pending;
-            }
-
-            public class SpawnG : GoalBase
-            {
-                public SpawnG(IGoal child)
-                {
-                    Child = child;
-                }
-
-                public IGoal Child { get; }
+                void Initialize();
+                void Update(IGoalContext ctx);
             }
 
             public class GoalBase : IGoal
             {
-                public virtual object FailureReason { get; protected set; }
+                public virtual void Update(IGoalContext context) { }
+                public virtual void Initialize() { }
+            }
 
-                public virtual GoalStatus Status { get; protected set; }
+            public class FromActionFactoryG : GoalBase
+            {
+                private Func<Action<IGoalContext>> _action;
+                private bool _failOnException;
 
-                public virtual IGoal Next(IContext ctx)
+                public FromActionFactoryG(Func<Action<IGoalContext>> action, bool failOnException = true)
                 {
-                    return null;
+                    _action = action;
+                    _failOnException = failOnException;
                 }
 
-                public static IGoal Resolve(IGoal goal, IContext ctx)
+                public override void Update(IGoalContext context)
                 {
-                    var curr = goal;
-
                     try
                     {
-                        var prev = curr;
-
-                        while (curr != null)
-                        {
-                            prev = curr;
-                            if (prev.Status != GoalStatus.Pending)
-                                break;
-
-                            curr = curr.Next(ctx);
-                        }
-
-                        return prev;
+                        _action()(context);
                     }
                     catch (Exception ex)
                     {
-                        return new ExceptionG(ex, curr);
+                        if (_failOnException)
+                        {
+                            context.Status = GoalStatus.Failure;
+                            context.FailureReason = ex;
+                        }
+                    }
+                }
+            }
+
+            public class FromFuncG : GoalBase
+            {
+                private Func<IGoalContext, GoalStatus> _func;
+                private bool _failOnException;
+
+                public FromFuncG(Func<IGoalContext, GoalStatus> func, bool failOnException = true)
+                {
+                    _func = func;
+                    _failOnException = failOnException;
+                }
+
+                public override void Update(IGoalContext context)
+                {
+                    try
+                    {
+                        context.Status = _func(context);
+                    }
+                    catch (Exception ex)
+                    {
+                        if (_failOnException)
+                        {
+                            context.Status = GoalStatus.Failure;
+                            context.FailureReason = ex;
+                        }
                     }
                 }
             }
 
             public class ActionG : ActionGoalBase
             {
-                public ActionG(Action<IContext> action) : base(action) { }
+                public ActionG(Action<IGoalContext> action) : base(action) { }
 
-                public override IGoal Next(IContext ctx)
+                public override void Update(IGoalContext ctx)
                 {
-                    if (Status == GoalStatus.Pending)
+                    try
                     {
-                        try
-                        {
-                            Action(ctx);
+                        Action(ctx);
 
-                            Status = GoalStatus.Success;
-                        }
-                        catch (Exception ex)
-                        {
-                            Status = GoalStatus.Failure;
-                            return new ExceptionG(ex, this);
-                        }
+                        ctx.Status = GoalStatus.Success;
                     }
-
-                    return null;
+                    catch (Exception ex)
+                    {
+                        ctx.Status = GoalStatus.Failure;
+                        ctx.FailureReason = ex;
+                    }
                 }
             }
 
             public class WhileActionG : ActionGoalBase
             {
-                public WhileActionG(Func<IContext, bool> pred, Action<IContext> action, bool failOnException = true) : base(action)
+                public WhileActionG(Func<IGoalContext, bool> pred, Action<IGoalContext> action, bool failOnException = true) : base(action)
                 {
                     Pred = pred;
                     FailOnException = failOnException;
                 }
 
-                public Func<IContext, bool> Pred { get; }
+                public Func<IGoalContext, bool> Pred { get; }
 
                 public bool FailOnException { get; }
 
-                public override IGoal Next(IContext ctx)
+                public override void Update(IGoalContext ctx)
                 {
                     try
                     {
@@ -401,25 +513,23 @@ namespace Dagmatic.Akka.Actor
                         }
                         else
                         {
-                            Status = GoalStatus.Success;
+                            ctx.Status = GoalStatus.Success;
                         }
                     }
                     catch (Exception ex)
                     {
                         if (FailOnException)
                         {
-                            Status = GoalStatus.Failure;
-                            return new ExceptionG(ex, this);
+                            ctx.Status = GoalStatus.Failure;
+                            ctx.FailureReason = ex;
                         }
                     }
-
-                    return null;
                 }
             }
 
             public class UntilG : GoalBase
             {
-                public UntilG(IGoal pred, Func<IContext, IGoal> body, bool failOnBodyFailure = true)
+                public UntilG(IGoal pred, IGoal body, bool failOnBodyFailure = true)
                 {
                     Pred = pred;
                     Body = body;
@@ -427,78 +537,80 @@ namespace Dagmatic.Akka.Actor
                 }
 
                 public IGoal Pred { get; protected set; }
-                public Func<IContext, IGoal> Body { get; }
+                public IGoal Body { get; }
                 public bool FailOnBodyFailure { get; }
 
-                public override IGoal Next(IContext ctx)
+                public override void Update(IGoalContext ctx)
                 {
-                    if (Status == GoalStatus.Pending)
+                    if (ctx.Children.Count == 0)
                     {
-                        Pred = Resolve(Pred, ctx);
-
-                        if (Pred.Status == GoalStatus.Pending)
-                            return FailOnBodyFailure ? (IGoal)new AndG(Body(ctx), this) : new ThenG(Body(ctx), this);
-
-                        Status = Pred.Status;
+                        ctx.SetChildren(Pred, Body);
                     }
-
-                    return null;
+                    else
+                    {
+                        if (ctx.ChildStats[0] != GoalStatus.Pending)
+                        {
+                            ctx.Status = ctx.ChildStats[0];
+                        }
+                        else if (ctx.ChildStats[1] != GoalStatus.Pending)
+                        {
+                            if (ctx.ChildStats[1] == GoalStatus.Failure && FailOnBodyFailure)
+                            {
+                                ctx.Status = GoalStatus.Failure;
+                            }
+                            else
+                            {
+                                ctx.SetChildren(Pred, Body);
+                            }
+                        }
+                    }
                 }
             }
 
             public class ActionGoalBase : GoalBase
             {
-                public ActionGoalBase(Action<IContext> action)
+                public ActionGoalBase(Action<IGoalContext> action)
                 {
                     Action = action;
                 }
 
-                public Action<IContext> Action;
+                public Action<IGoalContext> Action;
             }
 
             public class TimeoutG : GoalBase
             {
-                private IDisposable _token;
-                private Guid _timeoutId;
-
-                public TimeoutG(Func<IContext, TimeSpan> delay, IGoal worker, IGoal onTimeout)
+                public TimeoutG(Func<IGoalContext, TimeSpan> delay, IGoal worker, IGoal onTimeout)
                 {
                     Delay = delay;
                     Worker = worker;
                     OnTimeout = onTimeout;
                 }
 
-                public Func<IContext, TimeSpan> Delay { get; }
+                public Func<IGoalContext, TimeSpan> Delay { get; }
                 public IGoal Worker { get; protected set; }
                 public IGoal OnTimeout { get; }
 
-                public override IGoal Next(IContext ctx)
+                public override void Update(IGoalContext ctx)
                 {
-                    if (Status == GoalStatus.Pending)
+                    if (ctx.Children.Count == 0)
                     {
-                        if ((ctx.CurrentMessage as WFTimeout)?.Id == _timeoutId)
-                        {
-                            _token?.Dispose();
-                            return OnTimeout;
-                        }
+                        var timeoutId = Guid.NewGuid();
+                        var timedout = false;
+                        var token = ctx.Host.ScheduleMessage(Delay(ctx), new WFTimeout(timeoutId));
 
-                        Worker = Resolve(Worker, ctx);
-
-                        if (Worker.Status == GoalStatus.Pending)
-                        {
-                            if (_token == null)
-                            {
-                                _timeoutId = Guid.NewGuid();
-                                _token = ctx.Host.ScheduleMessage(Delay(ctx), new WFTimeout(_timeoutId));
-                            }
-                        }
-                        else
-                        {
-                            Status = Worker.Status;
-                        }
+                        ctx.SetChildren(
+                            new SequenceG(GoalEx.AllComplete,
+                                new ParallelG(GoalEx.AnyComplete,
+                                    new SequenceG(GoalEx.AllComplete,
+                                        Worker,
+                                        new ActionG(_ => token.Dispose())),
+                                    new WhenG(x => (x.CurrentMessage as WFTimeout)?.Id == timeoutId, new ActionG(_ => timedout = true))),
+                                new ConditionG(_ => timedout, OnTimeout)));
                     }
-
-                    return null;
+                    else if (ctx.ChildStats[0] != GoalStatus.Pending)
+                    {
+                        ctx.Status = ctx.ChildStats[0];
+                    }
                 }
             }
 
@@ -508,12 +620,18 @@ namespace Dagmatic.Akka.Actor
 
             public class FailG : GoalBase
             {
-                public override GoalStatus Status => GoalStatus.Failure;
+                public override void Update(IGoalContext context)
+                {
+                    context.Status = GoalStatus.Failure;
+                }
             }
 
             public class OkG : GoalBase
             {
-                public override GoalStatus Status => GoalStatus.Success;
+                public override void Update(IGoalContext context)
+                {
+                    context.Status = GoalStatus.Success;
+                }
             }
 
             public class IfG : GoalBase
@@ -529,48 +647,64 @@ namespace Dagmatic.Akka.Actor
                 public IGoal Then { get; }
                 public IGoal Else { get; }
 
-                public override IGoal Next(IContext ctx)
+                public override void Update(IGoalContext ctx)
                 {
-                    if (Cond.Status == GoalStatus.Pending)
+                    if (ctx.Children.Count == 0)
                     {
-                        Cond = Resolve(Cond, ctx);
-
-                        if (Cond.Status == GoalStatus.Success)
-                            return Then;
-
-                        if (Cond.Status == GoalStatus.Failure)
-                            return Else;
+                        ctx.SetChildren(Cond);
+                        return;
                     }
 
-                    return null;
+                    if (ctx.ChildStats[0] != GoalStatus.Pending)
+                    {
+                        if (ctx.ChildStats[0] == GoalStatus.Success)
+                        {
+                            if (Then != null)
+                                ctx.ReplaceSelf(Then);
+                            else
+                                ctx.Status = GoalStatus.Success;
+                        }
+                        else
+                        {
+                            if (@Else != null)
+                                ctx.ReplaceSelf(@Else);
+                            else
+                                ctx.Status = GoalStatus.Failure;
+                        }
+                    }
                 }
             }
 
             public class ConditionG : GoalBase
             {
-                private Func<IContext, bool> _pred;
+                private Func<IGoalContext, bool> _pred;
+                private IGoal _goal;
 
-                public ConditionG(Func<IContext, bool> pred)
+                public ConditionG(Func<IGoalContext, bool> pred, IGoal goal = null)
                 {
                     _pred = pred;
+                    _goal = goal;
                 }
 
-                public override IGoal Next(IContext ctx)
+                public override void Update(IGoalContext ctx)
                 {
-                    if (Status == GoalStatus.Pending)
+                    try
                     {
-                        try
+                        var status = _pred(ctx) ? GoalStatus.Success : GoalStatus.Failure;
+                        if (status == GoalStatus.Success && _goal != null)
                         {
-                            Status = _pred(ctx) ? GoalStatus.Success : GoalStatus.Failure;
+                            ctx.ReplaceSelf(_goal);
                         }
-                        catch (Exception ex)
+                        else
                         {
-                            Status = GoalStatus.Failure;
-                            return new ExceptionG(ex, this);
+                            ctx.Status = status;
                         }
                     }
-
-                    return null;
+                    catch (Exception ex)
+                    {
+                        ctx.Status = GoalStatus.Failure;
+                        ctx.FailureReason = ex;
+                    }
                 }
             }
 
@@ -578,59 +712,73 @@ namespace Dagmatic.Akka.Actor
             {
                 private ulong? _prevMessageCount;
 
-                public NextMessageG(IGoal goal, Func<IContext, bool> pred = null)
+                public NextMessageG(IGoal goal, Func<IGoalContext, bool> pred = null)
                 {
                     Goal = goal;
                     Pred = pred ?? (_ => true);
                 }
 
                 public IGoal Goal { get; }
-                public Func<IContext, bool> Pred { get; }
+                public Func<IGoalContext, bool> Pred { get; }
 
-                public override IGoal Next(IContext ctx)
+                public override void Initialize()
+                {
+                    _prevMessageCount = null;
+                }
+
+                public override void Update(IGoalContext ctx)
                 {
                     _prevMessageCount = _prevMessageCount ?? ctx.MessageCount;
 
                     if (ctx.MessageCount > _prevMessageCount)
                     {
                         if (Pred(ctx))
-                            return Goal;
-
-                        _prevMessageCount++;
+                        {
+                            if (Goal != null)
+                                ctx.ReplaceSelf(Goal);
+                            else
+                                ctx.Status = GoalStatus.Success;
+                        }
+                        else
+                        {
+                            _prevMessageCount++;
+                        }
                     }
-
-                    return null;
                 }
             }
 
             public class WhenG : GoalBase
             {
-                private Func<IContext, bool> _pred;
+                private Func<IGoalContext, bool> _pred;
+                private IGoal _goal;
 
-                public WhenG(Func<IContext, bool> pred)
+                public WhenG(Func<IGoalContext, bool> pred, IGoal goal = null)
                 {
                     _pred = pred;
+                    _goal = goal;
                 }
 
-                public override IGoal Next(IContext ctx)
+                public override void Update(IGoalContext ctx)
                 {
-                    if (Status == GoalStatus.Pending)
+                    try
                     {
-                        try
+                        if (_pred(ctx))
                         {
-                            if (_pred(ctx))
+                            if (_goal != null)
                             {
-                                Status = GoalStatus.Success;
+                                ctx.ReplaceSelf(_goal);
+                            }
+                            else
+                            {
+                                ctx.Status = GoalStatus.Success;
                             }
                         }
-                        catch (Exception ex)
-                        {
-                            Status = GoalStatus.Failure;
-                            return new ExceptionG(ex, this);
-                        }
                     }
-
-                    return null;
+                    catch (Exception ex)
+                    {
+                        ctx.Status = GoalStatus.Failure;
+                        ctx.FailureReason = ex;
+                    }
                 }
             }
 
@@ -638,9 +786,9 @@ namespace Dagmatic.Akka.Actor
             {
                 public ThenG(IGoal g1, IGoal g2) : base(g1, g2) { }
 
-                protected override IGoal OnGoal1Complete()
+                protected override void OnGoal1Complete(GoalStatus goal1Status, IGoalContext ctx)
                 {
-                    return Goal2;
+                    ctx.ReplaceSelf(Goal2);
                 }
             }
 
@@ -648,42 +796,16 @@ namespace Dagmatic.Akka.Actor
             {
                 public AndG(IGoal g1, IGoal g2) : base(g1, g2) { }
 
-                protected override IGoal OnGoal1Complete()
+                protected override void OnGoal1Complete(GoalStatus goal1Status, IGoalContext ctx)
                 {
-                    if (Goal1.Status == GoalStatus.Success)
+                    if (goal1Status == GoalStatus.Success)
                     {
-                        return Goal2;
+                        ctx.ReplaceSelf(Goal2);
                     }
-
-                    Status = GoalStatus.Failure;
-                    return null;
-                }
-            }
-
-            public class ParallelAndG : ParallelBinaryG
-            {
-                public ParallelAndG(IGoal g1, IGoal g2) : base(g1, g2) { }
-
-                protected override IGoal OnGoal1Complete()
-                {
-                    if (Goal1.Status == GoalStatus.Success)
+                    else
                     {
-                        return Goal2;
+                        ctx.Status = GoalStatus.Failure;
                     }
-
-                    Status = GoalStatus.Failure;
-                    return null;
-                }
-
-                protected override IGoal OnGoal2Complete()
-                {
-                    if (Goal2.Status == GoalStatus.Success)
-                    {
-                        return Goal1;
-                    }
-
-                    Status = GoalStatus.Failure;
-                    return null;
                 }
             }
 
@@ -691,42 +813,16 @@ namespace Dagmatic.Akka.Actor
             {
                 public OrG(IGoal g1, IGoal g2) : base(g1, g2) { }
 
-                protected override IGoal OnGoal1Complete()
+                protected override void OnGoal1Complete(GoalStatus goal1Status, IGoalContext ctx)
                 {
-                    if (Goal1.Status == GoalStatus.Failure)
+                    if (goal1Status == GoalStatus.Failure)
                     {
-                        return Goal2;
+                        ctx.ReplaceSelf(Goal2);
                     }
-
-                    Status = GoalStatus.Success;
-                    return null;
-                }
-            }
-
-            public class ParallelOrG : ParallelBinaryG
-            {
-                public ParallelOrG(IGoal g1, IGoal g2) : base(g1, g2) { }
-
-                protected override IGoal OnGoal1Complete()
-                {
-                    if (Goal1.Status == GoalStatus.Failure)
+                    else
                     {
-                        return Goal2;
+                        ctx.Status = GoalStatus.Success;
                     }
-
-                    Status = GoalStatus.Success;
-                    return null;
-                }
-
-                protected override IGoal OnGoal2Complete()
-                {
-                    if (Goal2.Status == GoalStatus.Failure)
-                    {
-                        return Goal1;
-                    }
-
-                    Status = GoalStatus.Success;
-                    return null;
                 }
             }
 
@@ -734,39 +830,16 @@ namespace Dagmatic.Akka.Actor
             {
                 public XorG(IGoal g1, IGoal g2) : base(g1, g2) { }
 
-                protected override IGoal OnGoal1Complete()
+                protected override void OnGoal1Complete(GoalStatus goal1Status, IGoalContext ctx)
                 {
-                    if (Goal1.Status == GoalStatus.Failure)
+                    if (goal1Status == GoalStatus.Failure)
                     {
-                        return Goal2;
+                        ctx.ReplaceSelf(Goal2);
                     }
-
-                    return new NotG(Goal2);
-                }
-            }
-
-            public class ParallelXorG : ParallelBinaryG
-            {
-                public ParallelXorG(IGoal g1, IGoal g2) : base(g1, g2) { }
-
-                protected override IGoal OnGoal1Complete()
-                {
-                    if (Goal1.Status == GoalStatus.Failure)
+                    else
                     {
-                        return Goal2;
+                        ctx.ReplaceSelf(new NotG(Goal2));
                     }
-
-                    return new NotG(Goal2);
-                }
-
-                protected override IGoal OnGoal2Complete()
-                {
-                    if (Goal2.Status == GoalStatus.Failure)
-                    {
-                        return Goal1;
-                    }
-
-                    return new NotG(Goal1);
                 }
             }
 
@@ -777,21 +850,18 @@ namespace Dagmatic.Akka.Actor
                     Goal = goal;
                 }
 
-                public IGoal Goal { get; private set; }
+                public IGoal Goal { get; }
 
-                public override IGoal Next(IContext ctx)
+                public override void Update(IGoalContext ctx)
                 {
-                    if (Status == GoalStatus.Pending)
+                    if (ctx.Children.Count == 0)
                     {
-                        Goal = Resolve(Goal, ctx);
-
-                        if (Goal.Status != GoalStatus.Pending)
-                        {
-                            Status = Goal.Status == GoalStatus.Success ? GoalStatus.Failure : GoalStatus.Success;
-                        }
+                        ctx.SetChildren(Goal);
                     }
-
-                    return null;
+                    else if (ctx.ChildStats[0] != GoalStatus.Pending)
+                    {
+                        ctx.Status = ctx.ChildStats[0] == GoalStatus.Success ? GoalStatus.Failure : GoalStatus.Success;
+                    }
                 }
             }
 
@@ -803,51 +873,14 @@ namespace Dagmatic.Akka.Actor
                     ExceptionSource = goal;
                 }
 
-                public override object FailureReason => Exception;
+                public override void Update(IGoalContext context)
+                {
+                    context.Status = GoalStatus.Failure;
+                    context.FailureReason = Exception;
+                }
 
                 public Exception Exception { get; }
                 public IGoal ExceptionSource { get; }
-
-                public override GoalStatus Status => GoalStatus.Failure;
-            }
-
-            public abstract class ParallelBinaryG : GoalBase
-            {
-                protected ParallelBinaryG(IGoal g1, IGoal g2)
-                {
-                    Goal1 = g1;
-                    Goal2 = g2;
-                }
-
-                public IGoal Goal1 { get; protected set; }
-                public IGoal Goal2 { get; protected set; }
-
-                public override IGoal Next(IContext ctx)
-                {
-                    if (Status == GoalStatus.Pending)
-                    {
-                        if (Goal1.Status == GoalStatus.Pending)
-                        {
-                            Goal1 = Resolve(Goal1, ctx);
-
-                            if (Goal1.Status != GoalStatus.Pending)
-                                return OnGoal1Complete();
-                        }
-
-                        if (Goal2.Status == GoalStatus.Pending)
-                        {
-                            Goal2 = Resolve(Goal2, ctx);
-
-                            if (Goal2.Status != GoalStatus.Pending)
-                                return OnGoal2Complete();
-                        }
-                    }
-
-                    return null;
-                }
-
-                protected abstract IGoal OnGoal1Complete();
-                protected abstract IGoal OnGoal2Complete();
             }
 
             public abstract class BinaryG : GoalBase
@@ -861,103 +894,103 @@ namespace Dagmatic.Akka.Actor
                 public IGoal Goal1 { get; protected set; }
                 public IGoal Goal2 { get; }
 
-                public override IGoal Next(IContext ctx)
+                public override void Update(IGoalContext ctx)
                 {
-                    if (Status == GoalStatus.Pending)
+
+                    if (ctx.Children.Count == 0)
                     {
-                        Goal1 = Resolve(Goal1, ctx);
-
-                        if (Goal1.Status != GoalStatus.Pending)
-                            return OnGoal1Complete();
+                        ctx.SetChildren(Goal1);
                     }
-
-                    return null;
+                    else
+                    {
+                        if (ctx.ChildStats[0] != GoalStatus.Pending)
+                        {
+                            OnGoal1Complete(ctx.ChildStats[0], ctx);
+                        }
+                    }
                 }
 
-                protected abstract IGoal OnGoal1Complete();
+                protected abstract void OnGoal1Complete(GoalStatus goal1Status, IGoalContext ctx);
             }
 
             public class ParallelG : GoalBase
             {
-                private Queue<IGoal> _goals = new Queue<IGoal>();
+                private IGoal[] _goals;
                 private Func<IEnumerable<GoalStatus>, GoalStatus> _statusFunc;
-                private List<GoalStatus> _stats = new List<GoalStatus>();
 
                 public ParallelG(Func<IEnumerable<GoalStatus>, GoalStatus> statusFunc, params IGoal[] goals)
                 {
                     _statusFunc = statusFunc;
-
-                    foreach (var goal in goals.Reverse())
-                    {
-                        _goals.Enqueue(goal);
-                    }
+                    _goals = goals;
                 }
 
-                public override IGoal Next(IContext ctx)
+                public override void Update(IGoalContext ctx)
                 {
-                    for (var i = 0; i < _goals.Count && Status == GoalStatus.Pending; i++)
+                    if (ctx.Children.Count == 0 && _goals.Length > 0)
                     {
-                        var curr = Resolve(_goals.Dequeue(), ctx);
-
-                        if (curr.Status == GoalStatus.Pending)
-                        {
-                            _goals.Enqueue(curr);
-                            UpdateStatus();
-                            continue;
-                        }
-
-                        _stats.Add(curr.Status);
-                        UpdateStatus();
+                        ctx.SetChildren(_goals);
                     }
-
-                    return null;
-                }
-
-                private void UpdateStatus()
-                {
-                    Status = _statusFunc(_goals.Select(g => g.Status).Concat(_stats));
+                    else
+                    {
+                        ctx.Status = _statusFunc(ctx.ChildStats.Values);
+                    }
                 }
             }
 
             public class SequenceG : GoalBase
             {
-                private Stack<IGoal> _goals = new Stack<IGoal>();
+                private IGoal[] _goals;
                 private Func<IEnumerable<GoalStatus>, GoalStatus> _statusFunc;
                 private List<GoalStatus> _stats = new List<GoalStatus>();
+                private int _index = -1;
 
                 public SequenceG(Func<IEnumerable<GoalStatus>, GoalStatus> statusFunc, params IGoal[] goals)
                 {
                     _statusFunc = statusFunc;
-
-                    foreach (var goal in goals.Reverse())
-                    {
-                        _goals.Push(goal);
-                    }
+                    _goals = goals;
                 }
 
-                public override IGoal Next(IContext ctx)
+                public override void Initialize()
                 {
-                    while (Status == GoalStatus.Pending && _goals.Count > 0)
-                    {
-                        var curr = Resolve(_goals.Pop(), ctx);
+                    _index = -1;
+                    _stats.Clear();
+                }
 
-                        if (curr.Status == GoalStatus.Pending)
+                public override void Update(IGoalContext ctx)
+                {
+                    if (_index < 0)
+                    {
+                        if (_goals.Length > 0)
                         {
-                            _goals.Push(curr);
-                            UpdateStatus();
-                            break;
+                            ctx.SetChildren(_goals[0]);
+                            _index = 0;
+                            return;
                         }
-
-                        _stats.Add(curr.Status);
-                        UpdateStatus();
                     }
 
-                    return null;
-                }
+                    if (ctx.Children.Count > 0)
+                    {
+                        if (ctx.ChildStats[0] == GoalStatus.Pending)
+                            return;
 
-                private void UpdateStatus()
-                {
-                    Status = _statusFunc(_goals.Select(g => g.Status).Concat(_stats));
+                        _stats.Add(ctx.ChildStats[0]);
+                    }
+
+                    ctx.Status = _statusFunc(_stats.Concat(Enumerable.Repeat(GoalStatus.Pending, _goals.Length - _index - 1)));
+
+                    if (ctx.Status == GoalStatus.Pending)
+                    {
+                        if (_index < _goals.Length - 1)
+                        {
+                            _index++;
+
+                            ctx.SetChildren(_goals[_index]);
+                        }
+                        else
+                        {
+                            ctx.SetChildren();
+                        }
+                    }
                 }
             }
         }

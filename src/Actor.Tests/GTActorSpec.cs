@@ -42,7 +42,7 @@ namespace Dagmatic.Akka.Tests.Actor
         {
             public OneEcho()
             {
-                StartWith(ReceiveAny(
+                StartWith(NextMessage(
                     Execute(ctx =>
                     {
                         Sender.Tell(ctx.CurrentMessage);
@@ -55,8 +55,8 @@ namespace Dagmatic.Akka.Tests.Actor
             public NestedEcho()
             {
                 StartWith(
-                    ReceiveAny(
-                        ReceiveAny(
+                    NextMessage(
+                        NextMessage(
                             Execute(ctx =>
                             {
                                 Sender.Tell(ctx.CurrentMessage);
@@ -92,7 +92,7 @@ namespace Dagmatic.Akka.Tests.Actor
             {
                 StartWith(AllSucceed(
                     Execute(ctx => ctx.Data.Add("1")),
-                    ReceiveAny(Execute(ctx => ctx.Data.Add(ctx.CurrentMessage as string))),
+                    NextMessage(Execute(ctx => ctx.Data.Add(ctx.CurrentMessage as string))),
                     Execute(ctx => latch.CountDown())), pipe);
             }
         }
@@ -102,13 +102,12 @@ namespace Dagmatic.Akka.Tests.Actor
             public SequenceReceiveSequenceReceive(List<string> pipe, TestLatch latch)
             {
                 StartWith(AllSucceed(
-                    ReceiveAny(Execute(ctx => ctx.Data.Add(ctx.CurrentMessage as string))),
+                    NextMessage(Execute(ctx => ctx.Data.Add(ctx.CurrentMessage as string))),
                     Execute(ctx => ctx.Data.Add("2")),
-                    AllSucceed(),
                     AllSucceed(
-                        ReceiveAny(AllSucceed(
+                        NextMessage(AllSucceed(
                             Execute(ctx => ctx.Data.Add(ctx.CurrentMessage as string)),
-                            ReceiveAny(Execute(ctx => ctx.Data.Add(ctx.CurrentMessage as string)))
+                            NextMessage(Execute(ctx => ctx.Data.Add(ctx.CurrentMessage as string)))
                         ))
                     ),
                     Execute(ctx => latch.CountDown())), pipe);
@@ -146,8 +145,8 @@ namespace Dagmatic.Akka.Tests.Actor
             {
                 StartWith(AllSucceed(
                     Parallel(ss => ss.AllSucceed(),
-                        ReceiveAny(Execute(ctx => ctx.Data.GetAndAdd(1))),
-                        ReceiveAny(Execute(ctx => ctx.Data.GetAndAdd(4)))),
+                        NextMessage(Execute(ctx => ctx.Data.GetAndAdd(1))),
+                        NextMessage(Execute(ctx => ctx.Data.GetAndAdd(4)))),
                     Execute(ctx => latch.CountDown())), counter);
             }
         }
@@ -163,11 +162,11 @@ namespace Dagmatic.Akka.Tests.Actor
             {
                 StartWith(
                     Parallel(ss => ss.AllSucceed(),
-                        Loop(_ => NextMessage(Execute(Process1))),
-                        Loop(_ => NextMessage(Execute(Process2)))), latch);
+                        Loop(NextMessage(Execute(Process1))),
+                        Loop(NextMessage(Execute(Process2)))), latch);
             }
 
-            public void Process1(GoalMachine.IContext ctx)
+            public void Process1(GoalMachine.IGoalContext ctx)
             {
                 var str = ctx.CurrentMessage as string;
                 if (str != null)
@@ -177,7 +176,7 @@ namespace Dagmatic.Akka.Tests.Actor
                 }
             }
 
-            public void Process2(GoalMachine.IContext ctx)
+            public void Process2(GoalMachine.IGoalContext ctx)
             {
                 var str = ctx.CurrentMessage as string;
                 if (str != null)
@@ -199,19 +198,25 @@ namespace Dagmatic.Akka.Tests.Actor
 
         public class SequenceReceiveReverseThree : GT<TestLatch>
         {
+            private Stack<object> _messages = new Stack<object>();
+
             public SequenceReceiveReverseThree()
             {
                 StartWith(
-                    ReceiveAny(
+                    NextMessage(
                         AllSucceed(
-                            ReceiveAny(
+                            Execute(ctx => _messages.Push(ctx.CurrentMessage)),
+                            NextMessage(
                                 AllSucceed(
-                                    ReceiveAny(Execute(ReplyEcho)),
+                                    Execute(ctx => _messages.Push(ctx.CurrentMessage)),
+                                    NextMessage(AllSucceed(
+                                        Execute(ctx => _messages.Push(ctx.CurrentMessage)),
+                                        Execute(ReplyEcho))),
                                     Execute(ReplyEcho))),
                             Execute(ReplyEcho))), null);
             }
 
-            private void ReplyEcho(GoalMachine.IContext ctx) => Sender.Tell(ctx.CurrentMessage);
+            private void ReplyEcho(GoalMachine.IGoalContext ctx) => Sender.Tell(_messages.Pop());
         }
 
         public class BecomePingPong : GT<List<string>>
@@ -222,7 +227,7 @@ namespace Dagmatic.Akka.Tests.Actor
             {
                 _latch = latch;
 
-                StartWith(ReceiveAny(o => (o as string) == "RUN", Become(Ping)), data);
+                StartWith(NextMessage(o => (o as string) == "RUN", Become(Ping)), data);
             }
 
             private GoalMachine.IGoal Done() =>
@@ -241,7 +246,7 @@ namespace Dagmatic.Akka.Tests.Actor
 
             private GoalMachine.IGoal Ping() =>
                 WithDoneAndDone(
-                    Receive<string>(s => s == "PING",
+                    NextMessage<string>(s => s == "PING",
                         AllSucceed(
                             Execute(ctx =>
                             {
@@ -252,7 +257,7 @@ namespace Dagmatic.Akka.Tests.Actor
 
             private GoalMachine.IGoal Pong() =>
                 WithDoneAndDone(
-                    Receive<string>(s => s == "PONG",
+                    NextMessage<string>(s => s == "PONG",
                         AllSucceed(
                             Execute(ctx =>
                             {
@@ -273,11 +278,11 @@ namespace Dagmatic.Akka.Tests.Actor
                             if (ctx.CurrentMessage == "THERE?") Sender.Tell("HERE!");
                         }),
                         Parallel(ss => ss.AllSucceed(),
-                            Receive<string>(s => s == "KILL",
+                            NextMessage<string>(s => s == "KILL",
                                 Become(() =>
                                     AllSucceed(
                                         Execute(_ => Sender.Tell("I TRIED")),
-                                        Receive<string>(s => s == "THERE?", Execute(_ => Sender.Tell("I ATE HIM")))))))), null);
+                                        NextMessage<string>(s => s == "THERE?", Execute(_ => Sender.Tell("I ATE HIM")))))))), null);
             }
         }
 
@@ -292,11 +297,11 @@ namespace Dagmatic.Akka.Tests.Actor
                             if (ctx.CurrentMessage == "THERE?") Sender.Tell("HERE!");
                         }),
                         Spawn(
-                            Receive<string>(s => s.Equals("KILL"),
+                            NextMessage<string>(s => s.Equals("KILL"),
                                 Become(() =>
                                     AllSucceed(
                                         Execute(_ => Sender.Tell("I TRIED")),
-                                        Receive<string>(s => s == "THERE?", Execute(_ => Sender.Tell("I ATE HIM")))))))), null);
+                                        NextMessage<string>(s => s == "THERE?", Execute(_ => Sender.Tell("I ATE HIM")))))))), null);
             }
         }
 
@@ -357,7 +362,7 @@ namespace Dagmatic.Akka.Tests.Actor
                 StartWith(
                     AnySucceed(
                         Fail(),
-                        ReceiveAny(Execute(_ => Sender.Tell(_.CurrentMessage)))), null);
+                        NextMessage(Execute(_ => Sender.Tell(_.CurrentMessage)))), null);
             }
         }
 
@@ -368,7 +373,7 @@ namespace Dagmatic.Akka.Tests.Actor
                 StartWith(
                     AnySucceed(
                         Not(Fail()),
-                        ReceiveAny(Execute(_ => Sender.Tell(_.CurrentMessage)))), null);
+                        NextMessage(Execute(_ => Sender.Tell(_.CurrentMessage)))), null);
             }
         }
 
@@ -409,7 +414,7 @@ namespace Dagmatic.Akka.Tests.Actor
             public LongTimeoutShortTask(TestLatch latch, AtomicCounter counter)
             {
                 StartWith(
-                    Loop(ctx =>
+                    Loop(
                         NextMessage(s => s.Equals("RUN"),
                             After(
                                 Timeout(TimeSpan.FromMilliseconds(500),
@@ -428,7 +433,7 @@ namespace Dagmatic.Akka.Tests.Actor
             public ShortTimeoutLongTask(TestLatch latch, AtomicCounter counter)
             {
                 StartWith(
-                    Loop(__ =>
+                    Loop(
                         NextMessage(s => s.Equals("RUN"),
                             After(
                                 Timeout(TimeSpan.FromMilliseconds(100),
@@ -447,13 +452,14 @@ namespace Dagmatic.Akka.Tests.Actor
             public WhileCountdown(AtomicCounter counter)
             {
                 StartWith(
-                    ReceiveAny(
+                    NextMessage(
                         While(ctx => ctx.Data.Current > 0,
-                            _ => Execute(ctx =>
+                            ctx =>
                              {
                                  Sender.Tell(ctx.Data.Current);
                                  ctx.Data.GetAndDecrement();
-                             }))), counter);
+                                 Self.Tell("AGAIN", Sender);
+                             })), counter);
             }
         }
 
@@ -485,7 +491,7 @@ namespace Dagmatic.Akka.Tests.Actor
                 Context.System.Scheduler.ScheduleTellOnceCancelable(100.Milliseconds(), Self, "HELLO", receiver);
 
                 StartWith(
-                    ReceiveAny(Execute(ctx => Sender.Tell(ctx.CurrentMessage + " FROM ME"))), null);
+                    NextMessage(Execute(ctx => Sender.Tell(ctx.CurrentMessage + " FROM ME"))), null);
             }
         }
 
@@ -496,7 +502,7 @@ namespace Dagmatic.Akka.Tests.Actor
                 StartWith(
                     AllSucceed(
                         Execute(ctx => Context.System.Scheduler.ScheduleTellOnceCancelable(100.Milliseconds(), Self, "HELLO", receiver)),
-                        ReceiveAny(Execute(ctx => Sender.Tell(ctx.CurrentMessage + " FROM ME")))), null);
+                        NextMessage(Execute(ctx => Sender.Tell(ctx.CurrentMessage + " FROM ME")))), null);
             }
         }
 
@@ -504,37 +510,26 @@ namespace Dagmatic.Akka.Tests.Actor
         {
             public BecomeIfReceive()
             {
-                StartWith(Odd(), null);
+                StartWith(NextMessage(Odd()), null);
             }
 
             public IStash Stash { get; set; }
 
             public GoalMachine.IGoal Odd() =>
-                AllSucceed(
-                    Execute(_ => Stash?.UnstashAll()),
-                    Loop(__ =>
-                        If(
-                            Receive<int>(
-                                If(ctx => ((int)ctx.CurrentMessage) % 2 == 1,
-                                    Execute(_ => Sender.Tell("ODD")))),
-                            null,
-                            AllSucceed(
-                                Execute(_ => Stash.Stash()),
-                                Become(Even)))), null);
+                Loop(
+                    AllComplete(
+                        If(ctx => ((int)ctx.CurrentMessage) % 2 == 1,
+                            Execute(_ => Sender.Tell("ODD")),
+                            Become(Even)),
+                        NextMessage()));
 
             public GoalMachine.IGoal Even() =>
-                AllSucceed(
-                    Execute(_ => Stash?.UnstashAll()),
-                    Loop(__ =>
-                        If(
-                            Receive<int>(
-                                If(ctx => ((int)ctx.CurrentMessage) % 2 == 0,
-                                    Execute(_ => Sender.Tell("EVEN")))),
-                            null,
-                            AllSucceed(
-                                Execute(_ => Stash.Stash()),
-                                Become(Odd)))), null);
-
+                Loop(
+                    AllComplete(
+                        If(ctx => ((int)ctx.CurrentMessage) % 2 == 0,
+                            Execute(_ => Sender.Tell("EVEN")),
+                            Become(Odd)),
+                        NextMessage()));
         }
 
         public class ToyTest : GT<object>
@@ -555,28 +550,28 @@ namespace Dagmatic.Akka.Tests.Actor
             }
 
             GoalMachine.IGoal Disconnected() =>
-                Receive<Message.ConnectedMsg>(
+                NextMessage<Message.ConnectedMsg>(
                     Become(Connected)); // Become takes in a Func, in order avoid cycles in graph
 
             GoalMachine.IGoal Connected() =>
                 Parallel(ss => ss.AllComplete(), // AllComplete irrelevant when Become overwrites the whole workflow
-                    Receive<Message.DisconnectedMsg>(
+                    NextMessage<Message.DisconnectedMsg>(
                         Become(Disconnected)),
                     Spawn(Awake())); // Using Spawn to limit Become scope, Becomes under Spawn overwrite Spawn child
             // Spawns still belong to their parent, and will be overwritten along with parent
             GoalMachine.IGoal Awake() =>
                 AllComplete(
                     Execute(_ => Sender.Tell("YAWN")),
-                    Forever(__ => // Forever until Become
+                    Forever( // Forever until Become
                        Parallel(ss => ss.AnySucceed(), // Parallel to listen to several message types/conditions
-                           Receive<Message.DoBark>(Execute(ctx => Sender.Tell("BARK"))), // Receive is a single callback
-                           Receive<Message.DoJump>(Execute(ctx => Sender.Tell("WHEE"))), // use loops to receive again
-                           Receive<Message.DoSleep>(Become(Sleeping)))));
+                           NextMessage<Message.DoBark>(Execute(ctx => Sender.Tell("BARK"))), // Receive is a single callback
+                           NextMessage<Message.DoJump>(Execute(ctx => Sender.Tell("WHEE"))), // use loops to receive again
+                           NextMessage<Message.DoSleep>(Become(Sleeping)))));
 
             GoalMachine.IGoal Sleeping() =>
                 AllComplete(
                     Execute(_ => Sender.Tell("ZZZZ")),
-                    Receive<Message.DoWake>( // Ignoring all messages besides DoWake
+                    NextMessage<Message.DoWake>( // Ignoring all messages besides DoWake
                         Become(Awake))); // But the Parallel in Connected also has a DisconnectedMsg listener
         }
 
@@ -588,7 +583,7 @@ namespace Dagmatic.Akka.Tests.Actor
             }
 
             GoalMachine.IGoal Test() =>
-                ReceiveAny(
+                NextMessage(
                     If(
                         If(ctx => ctx.CurrentMessage.Equals("TRUE"),
                             Execute(_ => Sender.Tell("SUCCESS"))),
@@ -603,15 +598,15 @@ namespace Dagmatic.Akka.Tests.Actor
             }
 
             GoalMachine.IGoal Test() =>
-                Forever(__ =>
+                Forever(
                     Parallel(ss => ss.AnyComplete(),
-                        Receive<string>(s => s.StartsWith("MEOW"),
+                        NextMessage<string>(s => s.StartsWith("MEOW"),
                             If(ctx => ctx.CurrentMessage.Equals("MEOWCAT"),
                                 Execute(_ => Sender.Tell("UCAT")))),
-                        Receive<string>(s => s.StartsWith("BARK"),
+                        NextMessage<string>(s => s.StartsWith("BARK"),
                             If(ctx => ctx.CurrentMessage.Equals("BARKDOG"),
                                 Execute(_ => Sender.Tell("UDOG")))),
-                        Receive<string>(s => s.StartsWith("BLAH"),
+                        NextMessage<string>(s => s.StartsWith("BLAH"),
                             If(ctx => ctx.CurrentMessage.Equals("BLAHPAL"),
                                 Execute(_ => Sender.Tell("UPAL"))))
                     ));
@@ -625,23 +620,23 @@ namespace Dagmatic.Akka.Tests.Actor
             }
 
             GoalMachine.IGoal Test() =>
-                If(ReceiveAny(),
+                NextMessage(
                     AllComplete(
                         Execute(_ => Sender.Tell("ANY")),
-                        If(ReceiveAny(s => s.Equals("ONE")),
+                        NextMessage(s => s.Equals("ONE"),
                             AllComplete(
                                 Execute(_ => Sender.Tell("ANYONE")),
-                                If(Receive<int>(),
+                                NextMessage<int>(
                                     AllComplete(
                                         Execute(_ => Sender.Tell("THREE")),
-                                        If(Receive<int>(i => i % 2 == 0),
+                                        NextMessage<int>(i => i % 2 == 0,
                                             Execute(_ => Sender.Tell("THREEEVEN")))))))));
         }
 
         #endregion
 
         [Fact]
-        public void BTActor_ConstructorIncrement()
+        public void GTActor_ConstructorIncrement()
         {
             var counter = new AtomicCounter(0);
             var latch = new TestLatch();
@@ -653,7 +648,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_ExecuteIncrement()
+        public void GTActor_ExecuteIncrement()
         {
             var counter = new AtomicCounter(0);
             var latch = new TestLatch();
@@ -665,7 +660,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_OneEcho_Exactly_One()
+        public void GTActor_OneEcho_Exactly_One()
         {
             var bt = Sys.ActorOf<OneEcho>();
 
@@ -679,7 +674,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_NestedEcho_Second()
+        public void GTActor_NestedEcho_Second()
         {
             var bt = Sys.ActorOf<NestedEcho>();
 
@@ -693,7 +688,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_SequenceOne()
+        public void GTActor_SequenceOne()
         {
             var pipe = new List<string>();
             var latch = new TestLatch();
@@ -706,7 +701,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_SequenceTwo()
+        public void GTActor_SequenceTwo()
         {
             var pipe = new List<string>();
             var latch = new TestLatch();
@@ -719,7 +714,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_SequenceReceive()
+        public void GTActor_SequenceReceive()
         {
             var pipe = new List<string>();
             var latch = new TestLatch();
@@ -734,7 +729,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_SequenceReceiveSequenceReceive()
+        public void GTActor_SequenceReceiveSequenceReceive()
         {
             var pipe = new List<string>();
             var latch = new TestLatch();
@@ -751,7 +746,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_Loop100()
+        public void GTActor_Loop100()
         {
             var bt = Sys.ActorOf(Props.Create(() => new LoopEcho()));
 
@@ -767,7 +762,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_SequenceParallelExecute()
+        public void GTActor_SequenceParallelExecute()
         {
             var counter = new AtomicCounter(0);
             var latch = new TestLatch();
@@ -779,7 +774,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_SequenceParallelReceive()
+        public void GTActor_SequenceParallelReceive()
         {
             var counter = new AtomicCounter(0);
             var latch = new TestLatch();
@@ -794,7 +789,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_ParallelLoopReceive()
+        public void GTActor_ParallelLoopReceive()
         {
             var counter = new AtomicCounter(0);
             var latch = new TestLatch();
@@ -813,7 +808,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_RecoverCurrentMessage()
+        public void GTActor_RecoverCurrentMessage()
         {
             var bt = Sys.ActorOf(Props.Create(() => new SequenceReceiveReverseThree()));
 
@@ -829,7 +824,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_BecomePingPong()
+        public void GTActor_BecomePingPong()
         {
             var pipe = new List<string>();
             var latch = new TestLatch(5);
@@ -847,7 +842,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_Become_Is_Limited_By_Spawn_Scope()
+        public void GTActor_Become_Is_Limited_By_Spawn_Scope()
         {
             var bt = Sys.ActorOf(Props.Create(() => new SpawnConfirm()));
 
@@ -863,24 +858,24 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_Become_Crosses_NonSpawn_Scopes()
+        public void GTActor_Become_Crosses_NonSpawn_Scopes()
         {
             var bt = Sys.ActorOf(Props.Create(() => new ParallelBecomer()));
 
             bt.Tell("THERE?", TestActor);
-            ExpectMsg("HERE!");
+            ExpectMsg("HERE!", TimeSpan.FromHours(1));
 
             bt.Tell("KILL", TestActor);
-            ExpectMsg("I TRIED");
+            ExpectMsg("I TRIED", TimeSpan.FromHours(1));
 
             bt.Tell("THERE?", TestActor);
-            ExpectMsg("I ATE HIM");
+            ExpectMsg("I ATE HIM", TimeSpan.FromHours(1));
 
             ExpectNoMsg(100);
         }
 
         [Fact]
-        public void BTActor_Spawn_Resets_To_Original_Workflow()
+        public void GTActor_Spawn_Resets_To_Original_Workflow()
         {
             var bt = Sys.ActorOf(Props.Create(() => new LoopSpawn()));
 
@@ -896,7 +891,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_All_Conditions()
+        public void GTActor_All_Conditions()
         {
             var bt = Sys.ActorOf(Props.Create(() => new AllConditions()));
 
@@ -918,7 +913,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_FailFails()
+        public void GTActor_FailFails()
         {
             var bt = Sys.ActorOf(Props.Create(() => new FailFails()));
 
@@ -927,7 +922,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_NotFailSucceeds()
+        public void GTActor_NotFailSucceeds()
         {
             var bt = Sys.ActorOf(Props.Create(() => new NotFailSucceeds()));
 
@@ -936,7 +931,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_Fail_After_Success_Succeeds()
+        public void GTActor_Fail_After_Success_Succeeds()
         {
             TestLatch latch = new TestLatch();
             AtomicCounter counter = new AtomicCounter(0);
@@ -948,7 +943,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_Success_After_Failure_Fails()
+        public void GTActor_Success_After_Failure_Fails()
         {
             TestLatch latch = new TestLatch();
             AtomicCounter counter = new AtomicCounter(0);
@@ -960,7 +955,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_Long_Timeout_Short_Delay()
+        public void GTActor_Long_Timeout_Short_Delay()
         {
             TestLatch latch = new TestLatch();
             AtomicCounter counter = new AtomicCounter(0);
@@ -979,7 +974,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_Short_Timeout_Long_Delay()
+        public void GTActor_Short_Timeout_Long_Delay()
         {
             TestLatch latch = new TestLatch(2);
             AtomicCounter counter = new AtomicCounter(0);
@@ -998,7 +993,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_ReceiveAny_While()
+        public void GTActor_NextMessage_While()
         {
             AtomicCounter counter = new AtomicCounter(5);
 
@@ -1010,7 +1005,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_Timeout_Runs_AllSucceed()
+        public void GTActor_Timeout_Runs_AllSucceed()
         {
             var latch = new TestLatch();
 
@@ -1020,7 +1015,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_Delay_Simple()
+        public void GTActor_Delay_Simple()
         {
             var latch = new TestLatch();
 
@@ -1030,7 +1025,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_SchedulTell()
+        public void GTActor_SchedulTell()
         {
             IScheduler scheduler = new HashedWheelTimerScheduler(Sys.Settings.Config, Log);
 
@@ -1042,21 +1037,21 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_Schedule_Tell_In_Constructor()
+        public void GTActor_Schedule_Tell_In_Constructor()
         {
             var bt = Sys.ActorOf(Props.Create(() => new ScheduleTellConstructor(TestActor)));
             ExpectMsg("HELLO FROM ME");
         }
 
         [Fact]
-        public void BTActor_Schedule_Tell_In_Execute()
+        public void GTActor_Schedule_Tell_In_Execute()
         {
             var bt = Sys.ActorOf(Props.Create(() => new ScheduleTellExecute(TestActor)));
             ExpectMsg("HELLO FROM ME");
         }
 
         [Fact]
-        public void BTActor_If_Loop_Receive_Become()
+        public void GTActor_If_Loop_Receive_Become()
         {
             var bt = Sys.ActorOf(Props.Create(() => new BecomeIfReceive()));
 
@@ -1070,12 +1065,12 @@ namespace Dagmatic.Akka.Tests.Actor
 
             foreach (var m in toExpe)
             {
-                ExpectMsg(m);
+                ExpectMsg(m, TimeSpan.FromHours(1));
             }
         }
 
         [Fact]
-        public void BTActor_ToyTest()
+        public void GTActor_ToyTest()
         {
             var bt = Sys.ActorOf(Props.Create(() => new ToyTest()));
 
@@ -1084,7 +1079,7 @@ namespace Dagmatic.Akka.Tests.Actor
             Action<object> assertUnhandled = s =>
             {
                 bt.Tell(s, TestActor);
-                ExpectMsg<UnhandledMessage>(m => m.Message.Equals(s));
+                ExpectNoMsg(TimeSpan.FromMilliseconds(100));
             };
 
             Action<object, object> assertReply = (s, r) =>
@@ -1111,17 +1106,17 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_IfNoElse_False_Fails()
+        public void GTActor_IfNoElse_False_Fails()
         {
             var bt = Sys.ActorOf(Props.Create(() => new IfNoElse()));
 
             bt.Tell("FALSE");
 
-            ExpectMsg("FAILURE");
+            ExpectMsg("FAILURE", TimeSpan.FromHours(1));
         }
 
         [Fact]
-        public void BTActor_Parallel_IfNoElse_Bug()
+        public void GTActor_Parallel_IfNoElse_Bug()
         {
             var bt = Sys.ActorOf(Props.Create(() => new ForeverParallelReceiveIfNoElse()));
 
@@ -1137,7 +1132,7 @@ namespace Dagmatic.Akka.Tests.Actor
         }
 
         [Fact]
-        public void BTActor_ReceiveNoChild_Only_Succeeds()
+        public void GTActor_ReceiveNoChild_Only_Succeeds()
         {
             var bt = Sys.ActorOf(Props.Create(() => new ReceiveNoChild()));
 
@@ -1146,7 +1141,7 @@ namespace Dagmatic.Akka.Tests.Actor
             Action<object> assertUnhandled = s =>
             {
                 bt.Tell(s, TestActor);
-                ExpectMsg<UnhandledMessage>(m => m.Message.Equals(s));
+                ExpectNoMsg(TimeSpan.FromMilliseconds(100));
             };
 
             Action<object, object> assertReply = (s, r) =>
