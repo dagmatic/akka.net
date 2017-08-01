@@ -633,6 +633,25 @@ namespace Dagmatic.Akka.Tests.Actor
                                             Execute(_ => Sender.Tell("THREEEVEN")))))))));
         }
 
+        public class WhenWhenWhen : GT<object>
+        {
+            public WhenWhenWhen()
+            {
+                StartWith(Test(), null);
+            }
+
+            GoalMachine.IGoal Test() =>
+                When(When(GetMessage("START"),
+                        Execute(ctx => Sender.Tell("SUCCESS!"))),
+                    When(When(ctx => ctx.CurrentMessage == "A"),
+                        Execute(_ => Sender.Tell("A!"))));
+
+            GoalMachine.IGoal GetMessage(string msg) =>
+                If(ctx => ctx.CurrentMessage == msg,
+                    Execute(_ => Sender.Tell($"GOT {msg}!")),
+                    Then(Execute(_ => Sender.Tell($"{_.CurrentMessage}, NOT {msg}!")), Fail()));
+        }
+
         #endregion
 
         [Fact]
@@ -1159,6 +1178,32 @@ namespace Dagmatic.Akka.Tests.Actor
             assertReply(4, "THREEEVEN");
 
             Sys.EventStream.Unsubscribe(TestActor, typeof(UnhandledMessage));
+        }
+
+        [Fact]
+        public void GTActor_When1()
+        {
+            var gt = Sys.ActorOf(Props.Create(() => new WhenWhenWhen()));
+
+            Action<object> assertUnhandled = s =>
+            {
+                gt.Tell(s, TestActor);
+                ExpectNoMsg(TimeSpan.FromMilliseconds(100));
+            };
+
+            Action<object, object> assertReply = (s, r) =>
+            {
+                gt.Tell(s, TestActor);
+                ExpectMsg(r);
+            };
+
+            assertReply("A", "A, NOT START!");
+            assertReply("B", "B, NOT START!");
+            assertReply("START", "GOT START!");
+            ExpectMsg("SUCCESS!");
+
+            assertUnhandled("B");
+            assertReply("A", "A!");
         }
     }
 }

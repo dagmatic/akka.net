@@ -47,6 +47,9 @@ namespace Dagmatic.Akka.Actor
         protected GoalMachine.WhenG When(Func<GoalMachine.IGoalContext, bool> pred, GoalMachine.IGoal goal = null)
             => new GoalMachine.WhenG(pred, goal);
 
+        protected GoalMachine.WhenG When(GoalMachine.IGoal pred, GoalMachine.IGoal goal = null)
+            => new GoalMachine.WhenG(pred, goal);
+
         protected GoalMachine.AndG And(GoalMachine.IGoal goal1, GoalMachine.IGoal goal2)
             => new GoalMachine.AndG(goal1, goal2);
 
@@ -749,10 +752,13 @@ namespace Dagmatic.Akka.Actor
 
             public class WhenG : GoalBase
             {
-                private Func<IGoalContext, bool> _pred;
+                private IGoal _pred;
                 private IGoal _goal;
 
                 public WhenG(Func<IGoalContext, bool> pred, IGoal goal = null)
+                    : this(new ConditionG(pred), goal) { }
+
+                public WhenG(IGoal pred, IGoal goal = null)
                 {
                     _pred = pred;
                     _goal = goal;
@@ -760,24 +766,26 @@ namespace Dagmatic.Akka.Actor
 
                 public override void Update(IGoalContext ctx)
                 {
-                    try
+                    if (ctx.Children.Count == 0)
                     {
-                        if (_pred(ctx))
+                        ctx.SetChildren(_pred);
+                        return;
+                    }
+
+                    if (ctx.ChildStats[0] == GoalStatus.Success)
+                    {
+                        if (_goal != null)
                         {
-                            if (_goal != null)
-                            {
-                                ctx.ReplaceSelf(_goal);
-                            }
-                            else
-                            {
-                                ctx.Status = GoalStatus.Success;
-                            }
+                            ctx.ReplaceSelf(_goal);
+                        }
+                        else
+                        {
+                            ctx.Status = GoalStatus.Success;
                         }
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        ctx.Status = GoalStatus.Failure;
-                        ctx.FailureReason = ex;
+                        ctx.SetChildren(new NextMessageG(_pred));
                     }
                 }
             }
