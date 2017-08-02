@@ -92,7 +92,7 @@ namespace Dagmatic.Akka.Tests.Actor
             {
                 StartWith(AllSucceed(
                     Execute(ctx => ctx.Data.Add("1")),
-                    NextMessage(Execute(ctx => ctx.Data.Add(ctx.CurrentMessage as string))),
+                    OnMessage(Execute(ctx => ctx.Data.Add(ctx.CurrentMessage as string))),
                     Execute(ctx => latch.CountDown())), pipe);
             }
         }
@@ -227,7 +227,7 @@ namespace Dagmatic.Akka.Tests.Actor
             {
                 _latch = latch;
 
-                StartWith(NextMessage(o => (o as string) == "RUN", Become(Ping)), data);
+                StartWith(OnMessage<string>(o => o.Equals("RUN"), Become(Ping)), data);
             }
 
             private GoalMachine.IGoal Done() =>
@@ -246,7 +246,7 @@ namespace Dagmatic.Akka.Tests.Actor
 
             private GoalMachine.IGoal Ping() =>
                 WithDoneAndDone(
-                    NextMessage<string>(s => s == "PING",
+                    OnMessage<string>(s => s == "PING",
                         AllSucceed(
                             Execute(ctx =>
                             {
@@ -257,7 +257,7 @@ namespace Dagmatic.Akka.Tests.Actor
 
             private GoalMachine.IGoal Pong() =>
                 WithDoneAndDone(
-                    NextMessage<string>(s => s == "PONG",
+                    OnMessage<string>(s => s == "PONG",
                         AllSucceed(
                             Execute(ctx =>
                             {
@@ -278,7 +278,7 @@ namespace Dagmatic.Akka.Tests.Actor
                             if (ctx.CurrentMessage == "THERE?") Sender.Tell("HERE!");
                         }),
                         Parallel(ss => ss.AllSucceed(),
-                            NextMessage<string>(s => s == "KILL",
+                            OnMessage<string>(s => s == "KILL",
                                 Become(() =>
                                     AllSucceed(
                                         Execute(_ => Sender.Tell("I TRIED")),
@@ -297,7 +297,7 @@ namespace Dagmatic.Akka.Tests.Actor
                             if (ctx.CurrentMessage == "THERE?") Sender.Tell("HERE!");
                         }),
                         Spawn(
-                            NextMessage<string>(s => s.Equals("KILL"),
+                            OnMessage<string>(s => s.Equals("KILL"),
                                 Become(() =>
                                     AllSucceed(
                                         Execute(_ => Sender.Tell("I TRIED")),
@@ -532,6 +532,42 @@ namespace Dagmatic.Akka.Tests.Actor
                         NextMessage()));
         }
 
+        public class ScheduleTimeout : GT<object>
+        {
+            private bool _scheduled;
+            private IActorRef _client;
+
+            public ScheduleTimeout(bool shortTime)
+            {
+                var time1 = shortTime ? TimeSpan.FromMilliseconds(100) : TimeSpan.FromSeconds(1);
+                var time2 = TimeSpan.FromMilliseconds(1100) - time1;
+
+                StartWith(AllComplete(
+                    Client(),
+                    Timeout(time2,
+                        Schedule(time1),
+                        Execute(_ => _client.Tell("TIMEOUT!")))), null);
+            }
+
+            public GoalMachine.IGoal Client() =>
+                When(ctx => ctx.CurrentMessage == "START!", Execute(_ => _client = Sender));
+
+            public GoalMachine.IGoal Schedule(TimeSpan delay) =>
+                FromAction(ctx =>
+                {
+                    if (ctx.CurrentMessage == "TIME!")
+                    {
+                        _client.Tell("IT IS TIME!");
+                        ctx.Status = GoalStatus.Success;
+                    }
+                    else if (!_scheduled)
+                    {
+                        ctx.ScheduleMessage("TIME!", delay);
+                        _scheduled = true;
+                    }
+                });
+        }
+
         public class ToyTest : GT<object>
         {
             public abstract class Message
@@ -650,6 +686,31 @@ namespace Dagmatic.Akka.Tests.Actor
                 If(ctx => ctx.CurrentMessage == msg,
                     Execute(_ => Sender.Tell($"GOT {msg}!")),
                     Then(Execute(_ => Sender.Tell($"{_.CurrentMessage}, NOT {msg}!")), Fail()));
+        }
+
+        public class OnMessageVsNextMessage : GT<object>
+        {
+            private int _counter;
+
+            public OnMessageVsNextMessage()
+            {
+                StartWith(
+                    Parallel(GoalEx.AllComplete,
+                        FromAction(_ => _counter++),
+                        AllComplete(
+                            Parallel(GoalEx.AllComplete,
+                                Next("A", "NEXT"),
+                                On("A", "ON")),
+                            Parallel(GoalEx.AllComplete,
+                                Next("A", "NEXT"),
+                                On("A", "ON")))), null);
+            }
+
+            GoalMachine.IGoal On(string msg, string reply) =>
+                OnMessage<string>(s => s.Equals(msg), Execute(_ => Sender.Tell($"{_counter}: {reply}")));
+
+            GoalMachine.IGoal Next(string msg, string reply) =>
+                NextMessage<string>(s => s.Equals(msg), Execute(_ => Sender.Tell($"{_counter}: {reply}")));
         }
 
         #endregion
@@ -1204,6 +1265,67 @@ namespace Dagmatic.Akka.Tests.Actor
 
             assertUnhandled("B");
             assertReply("A", "A!");
+        }
+
+        [Fact]
+        public void GTActor_ScheduleTimeoutShort()
+        {
+            var gt = Sys.ActorOf(Props.Create(() => new ScheduleTimeout(true)));
+
+            Action<object, object> assertReply = (s, r) =>
+            {
+                gt.Tell(s, TestActor);
+                ExpectMsg(r);
+            };
+
+            Action<object> assertUnhandled = s =>
+            {
+                gt.Tell(s, TestActor);
+                ExpectNoMsg(TimeSpan.FromMilliseconds(100));
+            };
+
+            assertUnhandled("GO!");
+            assertReply("START!", "IT IS TIME!");
+        }
+
+        [Fact]
+        public void GTActor_ScheduleTimeoutLong()
+        {
+            var gt = Sys.ActorOf(Props.Create(() => new ScheduleTimeout(false)));
+
+            Action<object, object> assertReply = (s, r) =>
+            {
+                gt.Tell(s, TestActor);
+                ExpectMsg(r, TimeSpan.FromHours(1));
+            };
+
+            Action<object> assertUnhandled = s =>
+            {
+                gt.Tell(s, TestActor);
+                ExpectNoMsg(TimeSpan.FromMilliseconds(100));
+            };
+
+            assertUnhandled("GO!");
+            assertReply("START!", "TIMEOUT!");
+        }
+
+        [Fact]
+        public void GTActor_OnChecksNowNextChecksNext()
+        {
+            var gt = Sys.ActorOf(Props.Create(() => new OnMessageVsNextMessage()));
+
+            Action<object, object> assertReply = (s, r) =>
+            {
+                gt.Tell(s, TestActor);
+                ExpectMsg(r, TimeSpan.FromHours(1));
+            };
+
+            gt.Tell("A", TestActor);
+            ExpectMsg("2: NEXT");
+            ExpectMsg("2: ON");
+            ExpectMsg("2: ON");
+            gt.Tell("A", TestActor);
+            ExpectMsg("3: NEXT");
         }
     }
 }

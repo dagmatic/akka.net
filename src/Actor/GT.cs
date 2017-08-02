@@ -113,6 +113,18 @@ namespace Dagmatic.Akka.Actor
         protected GoalMachine.NextMessageG NextMessage<T>(Func<T, bool> pred, GoalMachine.IGoal goal = null)
             => NextMessage(goal, ctx => ctx.CurrentMessage is T && pred((T)ctx.CurrentMessage));
 
+        protected GoalMachine.OnMessageG OnMessage(GoalMachine.IGoal goal = null, Func<GoalMachine.IGoalContext, bool> pred = null)
+            => new GoalMachine.OnMessageG(goal, pred);
+
+        protected GoalMachine.OnMessageG OnMessage(Func<object, bool> pred, GoalMachine.IGoal goal = null)
+            => OnMessage(goal, ctx => pred(ctx.CurrentMessage));
+
+        protected GoalMachine.OnMessageG OnMessage<T>(GoalMachine.IGoal goal = null)
+            => OnMessage(goal, ctx => ctx.CurrentMessage is T);
+
+        protected GoalMachine.OnMessageG OnMessage<T>(Func<T, bool> pred, GoalMachine.IGoal goal = null)
+            => OnMessage(goal, ctx => ctx.CurrentMessage is T && pred((T)ctx.CurrentMessage));
+
         protected GoalMachine.ThenG Then(GoalMachine.IGoal child, GoalMachine.IGoal then)
             => new GoalMachine.ThenG(child, then);
 
@@ -192,10 +204,17 @@ namespace Dagmatic.Akka.Actor
                 void ReplaceRoot(IGoal goal);
                 void ReplaceSelf(IGoal goal);
                 void Spawn(IGoal goal);
+                void ScheduleMessage(object message, TimeSpan delay);
             }
 
             public class GoalContext : IGoalContext
             {
+                public class ScheduledMessage
+                {
+                    public object Message;
+                    public Guid Id;
+                }
+
                 private class ReadonlyListDictionary<C, T> : IReadOnlyDictionary<int, T>
                 {
                     private List<C> _container;
@@ -237,6 +256,10 @@ namespace Dagmatic.Akka.Actor
                 }
 
                 private GoalMachine _machine;
+                private ImmutableDictionary<Guid, IDisposable> _scheduled = ImmutableDictionary<Guid, IDisposable>.Empty;
+                private Guid? _scheduledToRemove;
+                private object _scheduledMessage;
+                private ulong _scheduledCount = ulong.MinValue;
 
                 public GoalContext(GoalMachine machine, IGoal goal, GoalContext parent = null)
                 {
@@ -250,7 +273,17 @@ namespace Dagmatic.Akka.Actor
                     ParentContext = parent;
                 }
 
-                public object CurrentMessage => _machine.CurrentMessage;
+                public object CurrentMessage
+                {
+                    get
+                    {
+                        if (_scheduledCount == _machine.MessageCount)
+                            return _scheduledMessage;
+
+                        return _machine.CurrentMessage;
+                    }
+                }
+
                 public IMachineHost Host => _machine.Host;
                 public ulong MessageCount => _machine.MessageCount;
                 public IGoal Parent { get; }
@@ -268,6 +301,7 @@ namespace Dagmatic.Akka.Actor
                 public IGoal ReplacedSelf { get; protected set; }
                 public ImmutableDictionary<IGoal, GoalContext> ContextLookup { get; protected set; }
                 public ImmutableList<IGoal> SpawnedGoals { get; set; } = ImmutableList<IGoal>.Empty;
+                public ImmutableQueue<Tuple<object, TimeSpan>> ScheduledMessages { get; set; } = ImmutableQueue<Tuple<object, TimeSpan>>.Empty;
 
                 public void SetChildren(params IGoal[] children)
                 {
@@ -311,6 +345,55 @@ namespace Dagmatic.Akka.Actor
                     SpawnedGoals = ImmutableList<IGoal>.Empty;
                 }
 
+                public void ScheduleMessage(object message, TimeSpan delay)
+                {
+                    ScheduledMessages = ScheduledMessages.Enqueue(Tuple.Create(message, delay));
+                }
+
+                private void ScheduleMessages()
+                {
+                    Tuple<object, TimeSpan> current;
+                    while (!ScheduledMessages.IsEmpty)
+                    {
+                        ScheduledMessages = ScheduledMessages.Dequeue(out current);
+
+                        var id = Guid.NewGuid();
+                        var msg = new ScheduledMessage { Id = id, Message = current.Item1 };
+
+                        _scheduled = _scheduled.Add(id, _machine.Host.ScheduleMessage(current.Item2, msg));
+                    }
+                }
+
+                private void BeforeUpdate()
+                {
+                    ScheduledMessages = ImmutableQueue<Tuple<object, TimeSpan>>.Empty;
+
+                    if (_scheduledCount < _machine.MessageCount && _scheduledToRemove.HasValue)
+                    {
+                        _scheduled = _scheduled.Remove(_scheduledToRemove.Value);
+                        _scheduledToRemove = null;
+                    }
+
+                    var scheduled = _machine.CurrentMessage as ScheduledMessage;
+                    if (scheduled == null)
+                    {
+                        _scheduledCount = _machine.MessageCount + 1;
+                    }
+                    else if (_scheduled.ContainsKey(scheduled.Id))
+                    {
+                        _scheduledToRemove = scheduled.Id;
+                        _scheduledCount = _machine.MessageCount;
+                        _scheduledMessage = scheduled.Message;
+                    }
+                }
+
+                private void UpdateGoal()
+                {
+                    BeforeUpdate();
+
+                    Goal.Update(this);
+                }
+
                 public static void Run(GoalContext ctx)
                 {
                     var stack = new Stack<ImmutableList<GoalContext>>();
@@ -336,7 +419,7 @@ namespace Dagmatic.Akka.Actor
 
                                 if (pendingChildren.Count == 0)
                                 {
-                                    child.Goal.Update(child);
+                                    child.UpdateGoal();
                                 }
                                 else
                                 {
@@ -358,7 +441,7 @@ namespace Dagmatic.Akka.Actor
 
                                         child = child.ParentContext;
 
-                                        child.Goal.Update(child);
+                                        child.UpdateGoal();
 
                                         childUpdated = true;
 
@@ -367,6 +450,8 @@ namespace Dagmatic.Akka.Actor
 
                                     goto nextchildcheck;
                                 }
+
+                                child.ScheduleMessages();
 
                                 if (child.ReplacedRoot != null)
                                 {
@@ -745,6 +830,43 @@ namespace Dagmatic.Akka.Actor
                         else
                         {
                             _prevMessageCount++;
+                        }
+                    }
+                }
+            }
+
+            public class OnMessageG : GoalBase
+            {
+                private ulong _prevMessageCount;
+
+                public OnMessageG(IGoal goal, Func<IGoalContext, bool> pred = null)
+                {
+                    Goal = goal;
+                    Pred = pred ?? (_ => true);
+                }
+
+                public IGoal Goal { get; }
+                public Func<IGoalContext, bool> Pred { get; }
+
+                public override void Initialize()
+                {
+                    _prevMessageCount = ulong.MinValue;
+                }
+
+                public override void Update(IGoalContext ctx)
+                {
+                    if (ctx.MessageCount > _prevMessageCount)
+                    {
+                        if (Pred(ctx))
+                        {
+                            if (Goal != null)
+                                ctx.ReplaceSelf(Goal);
+                            else
+                                ctx.Status = GoalStatus.Success;
+                        }
+                        else
+                        {
+                            _prevMessageCount = ctx.MessageCount;
                         }
                     }
                 }
