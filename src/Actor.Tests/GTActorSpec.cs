@@ -713,6 +713,18 @@ namespace Dagmatic.Akka.Tests.Actor
                 NextMessage<string>(s => s.Equals(msg), Execute(_ => Sender.Tell($"{_counter}: {reply}")));
         }
 
+        public class FailChild : GT<object>
+        {
+            public FailChild()
+            {
+                StartWith(
+                    If(
+                        Fail(OnMessage<string>(s => s == "START!", Execute(_ => Sender.Tell("MESSAGE!")))),
+                        Execute(_ => Sender.Tell("THEN!")),
+                        Execute(_ => Sender.Tell("ELSE!"))), null);
+            }
+        }
+
         #endregion
 
         [Fact]
@@ -1326,6 +1338,16 @@ namespace Dagmatic.Akka.Tests.Actor
             ExpectMsg("2: ON");
             gt.Tell("A", TestActor);
             ExpectMsg("3: NEXT");
+        }
+
+        [Fact]
+        public void GTActor_FailChild()
+        {
+            var gt = Sys.ActorOf(Props.Create(() => new FailChild()));
+
+            gt.Tell("START!", TestActor);
+            ExpectMsg("MESSAGE!");
+            ExpectMsg("ELSE!");
         }
     }
 }

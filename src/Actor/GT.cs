@@ -95,8 +95,8 @@ namespace Dagmatic.Akka.Actor
         protected GoalMachine.IGoal Pass(GoalMachine.IGoal child)
             => Then(child, Ok());
 
-        protected GoalMachine.FailG Fail()
-            => new GoalMachine.FailG();
+        protected GoalMachine.FailG Fail(GoalMachine.IGoal child = null)
+            => new GoalMachine.FailG(child);
 
         protected GoalMachine.IGoal After(GoalMachine.IGoal child, GoalMachine.IGoal after)
             => Then(child, after);
@@ -708,9 +708,26 @@ namespace Dagmatic.Akka.Actor
 
             public class FailG : GoalBase
             {
+                private IGoal _child;
+
+                public FailG(IGoal child = null)
+                {
+                    _child = child;
+                }
+
                 public override void Update(IGoalContext context)
                 {
-                    context.Status = GoalStatus.Failure;
+                    if (_child == null)
+                        context.Status = GoalStatus.Failure;
+
+                    if (context.Children.Count == 0)
+                    {
+                        context.SetChildren(_child);
+                    }
+                    else
+                    {
+                        context.Status = GoalStatus.Failure;
+                    }
                 }
             }
 
