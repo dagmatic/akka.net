@@ -725,6 +725,21 @@ namespace Dagmatic.Akka.Tests.Actor
             }
         }
 
+        public class SimpleFactory : GT<object>
+        {
+            public SimpleFactory()
+            {
+                StartWith(
+                    AllSucceed(
+                        When(OnMessage<string>(s => s.Equals("START!"),
+                            Factory(ctx =>
+                            {
+                                Sender.Tell("FACTORY STARTING!");
+                                return Execute(x => Sender.Tell("FACTORY STARTED!"));
+                            })))), null);
+            }
+        }
+
         #endregion
 
         [Fact]
@@ -1348,6 +1363,16 @@ namespace Dagmatic.Akka.Tests.Actor
             gt.Tell("START!", TestActor);
             ExpectMsg("MESSAGE!");
             ExpectMsg("ELSE!");
+        }
+
+        [Fact]
+        public void GTActor_SimpleFactory()
+        {
+            var gt = Sys.ActorOf(Props.Create(() => new SimpleFactory()));
+
+            gt.Tell("START!", TestActor);
+            ExpectMsg("FACTORY STARTING!");
+            ExpectMsg("FACTORY STARTED!");
         }
     }
 }

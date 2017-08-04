@@ -29,6 +29,9 @@ namespace Dagmatic.Akka.Actor
         protected GoalMachine.ActionG Execute(Action<GoalMachine.IGoalContext> action)
             => new GoalMachine.ActionG(action);
 
+        protected GoalMachine.IGoal Factory(Func<GoalMachine.IGoalContext, GoalMachine.IGoal> factory)
+            => FromAction(ctx => ctx.ReplaceSelf(factory(ctx)));
+
         protected GoalMachine.FromActionFactoryG FromAction(Action<GoalMachine.IGoalContext> action, bool failOnException = true)
             => new GoalMachine.FromActionFactoryG(() => action, failOnException);
 
