@@ -740,6 +740,74 @@ namespace Dagmatic.Akka.Tests.Actor
             }
         }
 
+        public class ForeverWhenTrueIf : GT<object>
+        {
+            public ForeverWhenTrueIf()
+            {
+                StartWith(
+                    Forever(When(_ => true,
+                        If(ctx => ctx.CurrentMessage == "OK", Execute(_ => Sender.Tell("GO"))))), null);
+            }
+        }
+
+        public class NotAllSucceed : GT<object>
+        {
+            public NotAllSucceed()
+            {
+                StartWith(
+                    AllSucceed(
+                        NextMessage(),
+                        Execute(_ => Sender.Tell("1")),
+                        Fail(),
+                        Execute(_ => Sender.Tell("3"))), null);
+            }
+        }
+
+        public class IfElseFail : GT<object>
+        {
+            public IfElseFail()
+            {
+                StartWith(
+                    NextMessage(
+                        If(
+                            If(_ => false,
+                                Execute(__ => Sender.Tell("In Ok")),
+                                Fail(Execute(__ => Sender.Tell("In Fail")))),
+                            Execute(_ => Sender.Tell("Out Ok")),
+                            Fail(Execute(_ => Sender.Tell("Out Fail"))))), null);
+            }
+        }
+
+        public class ThenFail : GT<object>
+        {
+            public ThenFail()
+            {
+                StartWith(
+                    NextMessage(
+                        If(
+                           Then(
+                                Execute(__ => Sender.Tell("Ok So Far")),
+                                Fail(Execute(__ => Sender.Tell("Then Fail")))),
+                            Execute(_ => Sender.Tell("Out Ok")),
+                            Fail(Execute(_ => Sender.Tell("Out Fail"))))), null);
+            }
+        }
+
+        public class TimeoutThenFail : GT<object>
+        {
+            public TimeoutThenFail()
+            {
+                StartWith(
+                    NextMessage(
+                        If(
+                            Timeout(100.Milliseconds(),
+                                When(_ => false),
+                                Fail(Execute(_ => Sender.Tell("Failed On Timeout")))),
+                            Execute(_ => Sender.Tell("Out Ok")),
+                            Fail(Execute(_ => Sender.Tell("Out Fail"))))), null);
+            }
+        }
+
         #endregion
 
         [Fact]
@@ -1373,6 +1441,57 @@ namespace Dagmatic.Akka.Tests.Actor
             gt.Tell("START!", TestActor);
             ExpectMsg("FACTORY STARTING!");
             ExpectMsg("FACTORY STARTED!");
+        }
+
+        [Fact]
+        public void GTActor_ForeverAvoidsInfiniteLoop()
+        {
+            var gt = Sys.ActorOf(Props.Create(() => new ForeverWhenTrueIf()));
+
+            gt.Tell("KO", TestActor);
+            gt.Tell("OK", TestActor);
+            ExpectMsg("GO");
+        }
+
+        [Fact]
+        public void GTActor_AllSucceedCutsOnFailure()
+        {
+            var gt = Sys.ActorOf(Props.Create(() => new NotAllSucceed()));
+
+            gt.Tell("0", TestActor);
+            ExpectMsg("1");
+            ExpectNoMsg(100);
+        }
+
+        [Fact]
+        public void GTActor_IfInsideElseFailsOutsideIfFails()
+        {
+            var gt = Sys.ActorOf(Props.Create(() => new IfElseFail()));
+
+            gt.Tell("0", TestActor);
+            ExpectMsg("In Fail");
+            ExpectMsg("Out Fail");
+        }
+
+        [Fact]
+        public void GTActor_ThenFailAllFail()
+        {
+            var gt = Sys.ActorOf(Props.Create(() => new ThenFail()));
+
+            gt.Tell("0", TestActor);
+            ExpectMsg("Ok So Far");
+            ExpectMsg("Then Fail");
+            ExpectMsg("Out Fail");
+        }
+
+        [Fact]
+        public void GTActor_TimeoutThenFailAllFail()
+        {
+            var gt = Sys.ActorOf(Props.Create(() => new TimeoutThenFail()));
+
+            gt.Tell("0", TestActor);
+            ExpectMsg("Failed On Timeout");
+            ExpectMsg("Out Fail");
         }
     }
 }

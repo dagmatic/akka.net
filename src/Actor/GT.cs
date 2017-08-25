@@ -620,6 +620,8 @@ namespace Dagmatic.Akka.Actor
 
             public class UntilG : GoalBase
             {
+                private ulong _messageCount;
+
                 public UntilG(IGoal pred, IGoal body, bool failOnBodyFailure = true)
                 {
                     Pred = pred;
@@ -651,7 +653,15 @@ namespace Dagmatic.Akka.Actor
                             }
                             else
                             {
-                                ctx.SetChildren(Pred, Body);
+                                if (ctx.MessageCount > _messageCount)
+                                {
+                                    _messageCount = ctx.MessageCount;
+                                    ctx.SetChildren(Pred, Body);
+                                }
+                                else
+                                {
+                                    ctx.ReplaceSelf(new NextMessageG(this));
+                                }
                             }
                         }
                     }
@@ -687,16 +697,17 @@ namespace Dagmatic.Akka.Actor
                     {
                         var timeoutId = Guid.NewGuid();
                         var timedout = false;
+                        var success = false;
                         var token = ctx.Host.ScheduleMessage(Delay(ctx), new WFTimeout(timeoutId));
 
                         ctx.SetChildren(
-                            new SequenceG(GoalEx.AllComplete,
+                            new ThenG(
                                 new ParallelG(GoalEx.AnyComplete,
-                                    new SequenceG(GoalEx.AllComplete,
-                                        Worker,
+                                    new ThenG(
+                                        new IfG(Worker, new ActionG(_ => success = true), null),
                                         new ActionG(_ => token.Dispose())),
                                     new WhenG(x => (x.CurrentMessage as WFTimeout)?.Id == timeoutId, new ActionG(_ => timedout = true))),
-                                new ConditionG(_ => timedout, OnTimeout)));
+                                new IfG(new ConditionG(_ => timedout), OnTimeout, new ConditionG(_ => success))));
                     }
                     else if (ctx.ChildStats[0] != GoalStatus.Pending)
                     {
