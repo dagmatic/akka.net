@@ -6,6 +6,7 @@ namespace Dagmatic.Akka.Actor
     public interface IMachineHost
     {
         IDisposable ScheduleMessage(TimeSpan delay, object message);
+        void OnFailure(object failureReason);
     }
 
     public abstract class MachineHost : UntypedActor, IMachineHost
@@ -27,6 +28,8 @@ namespace Dagmatic.Akka.Actor
             return new CancellableOnDispose(
                 Context.System.Scheduler.ScheduleTellOnceCancelable(delay, Self, message, Sender));
         }
+
+        public virtual void OnFailure(object failureReason) { }
 
         private class CancellableOnDispose : IDisposable
         {

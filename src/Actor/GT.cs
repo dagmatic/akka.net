@@ -10,6 +10,13 @@ namespace Dagmatic.Akka.Actor
     {
         protected GoalMachine Machine { get; set; }
 
+        public event EventHandler<object> FailureReported;
+
+        public override void OnFailure(object failureReason)
+        {
+            FailureReported?.Invoke(this, failureReason);
+        }
+
         protected override void OnReceive(object message)
         {
             Machine.ProcessMessage(message);
@@ -395,6 +402,13 @@ namespace Dagmatic.Akka.Actor
                     BeforeUpdate();
 
                     Goal.Update(this);
+
+                    if (FailureReason != null)
+                    {
+                        Host.OnFailure(FailureReason);
+
+                        FailureReason = null;
+                    }
                 }
 
                 public static void Run(GoalContext ctx)

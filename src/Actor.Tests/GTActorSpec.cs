@@ -808,6 +808,23 @@ namespace Dagmatic.Akka.Tests.Actor
             }
         }
 
+        public class ExecuteExceptionFailEventActor : GT<object>
+        {
+            public ExecuteExceptionFailEventActor(List<object> reasons)
+            {
+                FailureReported += (s, o) => reasons.Add(o);
+
+                StartWith(NextMessage(
+                    If(Execute(_ =>
+                        {
+                            Sender.Tell("RUNNING");
+                            throw new Exception("Failed");
+                        }),
+                        Execute(_ => Sender.Tell("SUCCESS")),
+                        Execute(_ => Sender.Tell("FAILURE")))), null);
+            }
+        }
+
         #endregion
 
         [Fact]
@@ -1492,6 +1509,21 @@ namespace Dagmatic.Akka.Tests.Actor
             gt.Tell("0", TestActor);
             ExpectMsg("Failed On Timeout");
             ExpectMsg("Out Fail");
+        }
+
+        [Fact]
+        public void GTActor_Execute_Exception_Reports_Failure()
+        {
+            List<object> reasons = new List<object>();
+
+            var gt = Sys.ActorOf(Props.Create(() => new ExecuteExceptionFailEventActor(reasons)));
+
+            gt.Tell("START", TestActor);
+
+            ExpectMsg("RUNNING");
+            ExpectMsg("FAILURE");
+            Assert.Equal(1, reasons.Count);
+            Assert.IsType<Exception>(reasons[0]);
         }
     }
 }
