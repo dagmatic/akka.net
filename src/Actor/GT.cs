@@ -72,6 +72,9 @@ namespace Dagmatic.Akka.Actor
         protected GoalMachine.SequenceG AnySucceed(params GoalMachine.IGoal[] children)
             => Sequence(GoalEx.AnySucceed, children);
 
+        protected GoalMachine.SequenceG FirstSucceed(params GoalMachine.IGoal[] children)
+            => Sequence(GoalEx.FirstSucceed, children);
+
         protected GoalMachine.SequenceG AllSucceed(params GoalMachine.IGoal[] children)
             => Sequence(GoalEx.AllSucceed, children);
 
