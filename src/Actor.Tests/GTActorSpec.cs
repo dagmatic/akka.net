@@ -4,6 +4,7 @@ using System.Linq;
 using Akka.Actor;
 using Akka.Event;
 using Akka.TestKit;
+using Akka.Util;
 using Akka.Util.Internal;
 using Dagmatic.Akka.Actor;
 using FluentAssertions;
@@ -825,6 +826,58 @@ namespace Dagmatic.Akka.Tests.Actor
             }
         }
 
+        public class SequenceBench : GT<object>
+        {
+            public SequenceBench(
+                AtomicCounter goals,
+                TestLatch done,
+                AtomicBoolean testResult,
+                Func<IEnumerable<GoalStatus>, GoalStatus> statusFunc,
+                params bool[] results)
+            {
+                StartWith(
+                    AllComplete(
+                        If(Sequence(statusFunc,
+                            results.Select(r =>
+                                AllSucceed(
+                                    Execute(_ => goals.IncrementAndGet()),
+                                    Condition(_ => r))).OfType<GoalMachine.IGoal>().ToArray()),
+                            Execute(_ => testResult.Value = true),
+                            Execute(_ => testResult.Value = false)),
+                        Execute(_ => done.CountDown())), null);
+            }
+        }
+
+        public class SequenceBenchRunner
+        {
+            private GTActorSpec _spec;
+
+            public SequenceBenchRunner(GTActorSpec spec)
+            {
+                _spec = spec;
+            }
+
+            public int GoalsRun;
+            public bool Result;
+
+            public void Run(bool expectedResult, int expectedCount, Func<IEnumerable<GoalStatus>, GoalStatus> statusFunc, params bool[] results)
+            {
+                var done = new TestLatch();
+                var goals = new AtomicCounter(0);
+                var result = new AtomicBoolean();
+
+                var gt = _spec.Sys.ActorOf(Props.Create(() => new SequenceBench(goals, done, result, statusFunc, results)));
+
+                done.Ready();
+
+                GoalsRun = goals.Current;
+                Result = result.Value;
+
+                Assert.Equal(expectedResult, Result);
+                Assert.Equal(expectedCount, GoalsRun);
+            }
+        }
+
         #endregion
 
         [Fact]
@@ -1524,6 +1577,46 @@ namespace Dagmatic.Akka.Tests.Actor
             ExpectMsg("FAILURE");
             Assert.Equal(1, reasons.Count);
             Assert.IsType<Exception>(reasons[0]);
+        }
+
+        [Fact]
+        public void GTActor_Sequence_Verify_AllSucceedThru()
+        {
+            var bench = new SequenceBenchRunner(this);
+
+            bench.Run(false, 0, GoalEx.AllSucceedThru);
+
+            bench.Run(true, 1, GoalEx.AllSucceedThru, true);
+
+            bench.Run(false, 1, GoalEx.AllSucceedThru, false);
+
+            bench.Run(true, 2, GoalEx.AllSucceedThru, true, true);
+
+            bench.Run(false, 2, GoalEx.AllSucceedThru, true, false);
+
+            bench.Run(false, 2, GoalEx.AllSucceedThru, false, true);
+
+            bench.Run(false, 2, GoalEx.AllSucceedThru, false, false);
+        }
+
+        [Fact]
+        public void GTActor_Sequence_Verify_AnySucceedThru()
+        {
+            var bench = new SequenceBenchRunner(this);
+
+            bench.Run(false, 0, GoalEx.AnySucceedThru);
+
+            bench.Run(true, 1, GoalEx.AnySucceedThru, true);
+
+            bench.Run(false, 1, GoalEx.AnySucceedThru, false);
+
+            bench.Run(true, 2, GoalEx.AnySucceedThru, true, true);
+
+            bench.Run(true, 2, GoalEx.AnySucceedThru, true, false);
+
+            bench.Run(true, 2, GoalEx.AnySucceedThru, false, true);
+
+            bench.Run(false, 2, GoalEx.AnySucceedThru, false, false);
         }
     }
 }

@@ -1180,9 +1180,24 @@ namespace Dagmatic.Akka.Actor
 
     public static class GoalEx
     {
+        /// <summary>
+        /// Run goals until all succeed or any fail.
+        /// </summary>
+        /// <param name="states"></param>
+        /// <returns></returns>
         public static GoalStatus AllSucceed(this IEnumerable<GoalStatus> states)
         {
             return GetStatus(states, CalcAllSucceed);
+        }
+
+        /// <summary>
+        /// Run all goals, then see if they all succeeded.
+        /// </summary>
+        /// <param name="states"></param>
+        /// <returns></returns>
+        public static GoalStatus AllSucceedThru(this IEnumerable<GoalStatus> states)
+        {
+            return GetStatus(states, CalcAllSucceedThru);
         }
 
         public static GoalStatus FirstSucceed(this IEnumerable<GoalStatus> states)
@@ -1190,9 +1205,24 @@ namespace Dagmatic.Akka.Actor
             return GetStatus(states, CalcFirstSucceed);
         }
 
+        /// <summary>
+        /// Run goals until one succeeds, or to the end.
+        /// </summary>
+        /// <param name="states"></param>
+        /// <returns></returns>
         public static GoalStatus AnySucceed(this IEnumerable<GoalStatus> states)
         {
             return GetStatus(states, CalcAnySucceed);
+        }
+
+        /// <summary>
+        /// Run goals to the end, then see if any succeeded.
+        /// </summary>
+        /// <param name="states"></param>
+        /// <returns></returns>
+        public static GoalStatus AnySucceedThru(this IEnumerable<GoalStatus> states)
+        {
+            return GetStatus(states, CalcAnySucceedThru);
         }
 
         public static GoalStatus AllComplete(this IEnumerable<GoalStatus> states)
@@ -1232,6 +1262,17 @@ namespace Dagmatic.Akka.Actor
                     : GoalStatus.Success;
         }
 
+        private static GoalStatus CalcAllSucceedThru(bool hasFailure, bool hasSuccess, bool hasPending, bool hasAny)
+        {
+            return !hasAny
+                ? GoalStatus.Failure
+                : hasPending
+                    ? GoalStatus.Pending
+                    : hasFailure
+                        ? GoalStatus.Failure
+                        : GoalStatus.Success;
+        }
+
         private static GoalStatus CalcFirstSucceed(bool hasFailure, bool hasSuccess, bool hasPending, bool hasAny)
         {
             return !hasAny || hasFailure
@@ -1267,6 +1308,17 @@ namespace Dagmatic.Akka.Actor
                     ? GoalStatus.Success
                     : hasPending
                         ? GoalStatus.Pending
+                        : GoalStatus.Failure;
+        }
+
+        private static GoalStatus CalcAnySucceedThru(bool hasFailure, bool hasSuccess, bool hasPending, bool hasAny)
+        {
+            return !hasAny
+                ? GoalStatus.Failure
+                : hasPending
+                    ? GoalStatus.Pending
+                    : hasSuccess
+                        ? GoalStatus.Success
                         : GoalStatus.Failure;
         }
 
