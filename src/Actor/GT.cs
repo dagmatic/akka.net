@@ -6,6 +6,10 @@ using System.Linq;
 
 namespace Dagmatic.Akka.Actor
 {
+    /// <summary>
+    /// Fluent interface to <see cref="GT{TData}.GoalMachine.IGoalContext"/>
+    /// </summary>
+    /// <typeparam name="TData"></typeparam>
     public class GT<TData> : MachineHost
     {
         protected GoalMachine Machine { get; set; }
@@ -22,9 +26,20 @@ namespace Dagmatic.Akka.Actor
             Machine.ProcessMessage(message);
         }
 
+        /// <summary>
+        /// Replace root (created by <see cref="Spawn"/>) with result of <see cref="factory"/>().
+        /// Internally, creates a goal to execute <see cref="GoalMachine.IGoalContext.ReplaceRoot"/>
+        /// </summary>
+        /// <param name="factory"></param>
+        /// <returns></returns>
         protected GoalMachine.IGoal Become(Func<GoalMachine.IGoal> factory)
             => new GoalMachine.FromActionFactoryG(() => ctx => ctx.ReplaceRoot(factory()));
 
+        /// <summary>
+        /// This goal becomes root and possible target for <see cref="Become"/>
+        /// </summary>
+        /// <param name="goal"></param>
+        /// <returns></returns>
         protected GoalMachine.IGoal Spawn(GoalMachine.IGoal goal)
             => new GoalMachine.FromFuncG(ctx =>
             {
@@ -33,142 +48,395 @@ namespace Dagmatic.Akka.Actor
                 return GoalStatus.Pending;
             });
 
+        /// <summary>
+        /// Runs action and completes with Success or with Failure if an exception is thrown.
+        /// </summary>
+        /// <param name="action"></param>
+        /// <returns></returns>
         protected GoalMachine.ActionG Execute(Action<GoalMachine.IGoalContext> action)
             => new GoalMachine.ActionG(action);
 
+        /// <summary>
+        /// Dynamic creation of goals.
+        /// </summary>
+        /// <param name="factory"></param>
+        /// <returns></returns>
         protected GoalMachine.IGoal Factory(Func<GoalMachine.IGoalContext, GoalMachine.IGoal> factory)
             => FromAction(ctx => ctx.ReplaceSelf(factory(ctx)));
 
+        /// <summary>
+        /// Ad-hoc implementation of <see cref="GT{TData}.GoalMachine.IGoal"/>
+        /// </summary>
+        /// <param name="action"></param>
+        /// <param name="failOnException"></param>
+        /// <returns></returns>
         protected GoalMachine.FromActionFactoryG FromAction(Action<GoalMachine.IGoalContext> action, bool failOnException = true)
             => new GoalMachine.FromActionFactoryG(() => action, failOnException);
 
+        /// <summary>
+        /// Ad-hoc implementation of <see cref="GT{TData}.GoalMachine.IGoal"/>
+        /// </summary>
+        /// <param name="func"></param>
+        /// <returns></returns>
         protected GoalMachine.FromFuncG FromFunction(Func<GoalMachine.IGoalContext, GoalStatus> func)
             => new GoalMachine.FromFuncG(func);
 
+        /// <summary>
+        /// Waits for @cond goal to complete, then waits for @then goal if Success, or for @else goal if Failure
+        /// </summary>
+        /// <param name="cond">Goal that decides whether @then or @else are selected</param>
+        /// <param name="then">Reports Success if null</param>
+        /// <param name="else">Reports Failure if null</param>
+        /// <returns></returns>
         protected GoalMachine.IfG If(GoalMachine.IGoal cond, GoalMachine.IGoal @then = null, GoalMachine.IGoal @else = null)
             => new GoalMachine.IfG(cond, @then, @else);
 
+        /// <summary>
+        /// Instant selection of @then or @else
+        /// </summary>
+        /// <param name="pred"></param>
+        /// <param name="then"></param>
+        /// <param name="else"></param>
+        /// <returns></returns>
         protected GoalMachine.IfG If(Func<GoalMachine.IGoalContext, bool> pred, GoalMachine.IGoal @then = null, GoalMachine.IGoal @else = null)
             => new GoalMachine.IfG(Condition(pred), @then, @else);
 
+        /// <summary>
+        /// Instant decision between Success or Failure
+        /// </summary>
+        /// <param name="pred"></param>
+        /// <returns></returns>
         protected GoalMachine.ConditionG Condition(Func<GoalMachine.IGoalContext, bool> pred)
             => new GoalMachine.ConditionG(pred);
 
+        /// <summary>
+        /// Waits for @pred to become true. Then if @goal is not null, runs it, otherwise report Success.
+        /// </summary>
+        /// <param name="pred"></param>
+        /// <param name="goal"></param>
+        /// <returns></returns>
         protected GoalMachine.WhenG When(Func<GoalMachine.IGoalContext, bool> pred, GoalMachine.IGoal goal = null)
             => new GoalMachine.WhenG(pred, goal);
 
+        /// <summary>
+        /// Waits for @pred goal to complete with Success. If it reports Failure, reinitializes it and waits for next message. Then runs @goal if not null. Otherwise report Success.
+        /// </summary>
+        /// <param name="pred">Goal to complete with Success before proceeding.</param>
+        /// <param name="goal">Child goal</param>
+        /// <returns></returns>
         protected GoalMachine.WhenG When(GoalMachine.IGoal pred, GoalMachine.IGoal goal = null)
             => new GoalMachine.WhenG(pred, goal);
 
+        /// <summary>
+        /// Both goals must succeed to report Success, otherwise Report failure. Runs @goal1 first. If successful, runs @goal2.
+        /// </summary>
+        /// <param name="goal1"></param>
+        /// <param name="goal2"></param>
+        /// <returns></returns>
         protected GoalMachine.AndG And(GoalMachine.IGoal goal1, GoalMachine.IGoal goal2)
             => new GoalMachine.AndG(goal1, goal2);
 
+        /// <summary>
+        /// Runs @children in sequence, using @pred to report status.
+        /// </summary>
+        /// <param name="pred"></param>
+        /// <param name="children"></param>
+        /// <returns></returns>
         protected GoalMachine.SequenceG Sequence(Func<IEnumerable<GoalStatus>, GoalStatus> pred, params GoalMachine.IGoal[] children)
             => new GoalMachine.SequenceG(pred, children);
 
+        /// <summary>
+        /// Runs @children in parallel, meaning, runs all children in supplied order with each message. The processing order is guaranteed. Uses @pred to report status.
+        /// </summary>
+        /// <param name="pred"></param>
+        /// <param name="children"></param>
+        /// <returns></returns>
         protected GoalMachine.ParallelG Parallel(Func<IEnumerable<GoalStatus>, GoalStatus> pred, params GoalMachine.IGoal[] children)
             => new GoalMachine.ParallelG(pred, children);
 
+        /// <summary>
+        /// Runs children in sequence, but stops as soon as one reports Success.
+        /// </summary>
+        /// <param name="children"></param>
+        /// <returns></returns>
         protected GoalMachine.SequenceG AnySucceed(params GoalMachine.IGoal[] children)
             => Sequence(GoalEx.AnySucceed, children);
 
+        /// <summary>
+        /// Runs all children in sequence, then sees if any succeeded.
+        /// </summary>
+        /// <param name="children"></param>
+        /// <returns></returns>
         protected GoalMachine.SequenceG AnySucceedThru(params GoalMachine.IGoal[] children)
             => Sequence(GoalEx.AnySucceedThru, children);
 
+        /// <summary>
+        /// Runs children in sequence, but stops as soon as one reports Failure.
+        /// </summary>
+        /// <param name="children"></param>
+        /// <returns></returns>
         protected GoalMachine.SequenceG AllSucceed(params GoalMachine.IGoal[] children)
             => Sequence(GoalEx.AllSucceed, children);
 
+        /// <summary>
+        /// Runs all children in sequence, then sees if all succeeded.
+        /// </summary>
+        /// <param name="children"></param>
+        /// <returns></returns>
         protected GoalMachine.SequenceG AllSucceedThru(params GoalMachine.IGoal[] children)
             => Sequence(GoalEx.AllSucceedThru, children);
 
+        /// <summary>
+        /// Runs all children in sequence. Then reports Success.
+        /// </summary>
+        /// <param name="children"></param>
+        /// <returns></returns>
         protected GoalMachine.SequenceG AllComplete(params GoalMachine.IGoal[] children)
             => Sequence(GoalEx.AllComplete, children);
 
+        /// <summary>
+        /// Executes @action repeatedly with each message
+        /// </summary>
+        /// <param name="action"></param>
+        /// <returns></returns>
         protected GoalMachine.WhileActionG Loop(Action<GoalMachine.IGoalContext> action)
             => While(_ => true, action);
 
+        /// <summary>
+        /// Executes @body goal repeatedly until in reports Failure
+        /// </summary>
+        /// <param name="body"></param>
+        /// <returns></returns>
         protected GoalMachine.UntilG Loop(GoalMachine.IGoal body)
             => Until(When(_ => false), body);
 
+        /// <summary>
+        /// Execute @body goal repeatedly
+        /// </summary>
+        /// <param name="body"></param>
+        /// <returns></returns>
         protected GoalMachine.UntilG Forever(GoalMachine.IGoal body)
             => Until(When(_ => false), body, false);
 
+        /// <summary>
+        /// Execute @body goal repeatedly until @pred is false or @body completes with Failure
+        /// </summary>
+        /// <param name="pred"></param>
+        /// <param name="body"></param>
+        /// <returns></returns>
         protected GoalMachine.UntilG While(Func<GoalMachine.IGoalContext, bool> pred, GoalMachine.IGoal body)
             => Until(When(ctx => !pred(ctx)), body);
 
+        /// <summary>
+        /// Execute @action repeatedly with each message, ignoring exceptions
+        /// </summary>
+        /// <param name="action"></param>
+        /// <returns></returns>
         protected GoalMachine.WhileActionG Forever(Action<GoalMachine.IGoalContext> action)
             => While(_ => true, action, false);
 
+        /// <summary>
+        /// Execute @action until @pred is false or @failOnException is true and @action throws exception.
+        /// </summary>
+        /// <param name="pred"></param>
+        /// <param name="action"></param>
+        /// <param name="failOnException"></param>
+        /// <returns></returns>
         protected GoalMachine.WhileActionG While(Func<GoalMachine.IGoalContext, bool> pred, Action<GoalMachine.IGoalContext> action, bool failOnException = true)
             => new GoalMachine.WhileActionG(pred, action);
 
+        /// <summary>
+        /// Execute @body goal until @pred is true or failOnBodyFailure is true and @body completes with Failure.
+        /// </summary>
+        /// <param name="pred"></param>
+        /// <param name="body"></param>
+        /// <param name="failOnBodyFailure"></param>
+        /// <returns></returns>
         protected GoalMachine.UntilG Until(GoalMachine.IGoal pred, GoalMachine.IGoal body, bool failOnBodyFailure = true)
             => new GoalMachine.UntilG(pred, body, failOnBodyFailure);
 
+        /// <summary>
+        /// Waits for @child to complete and then inverts result from Success to Failure and vice versa.
+        /// </summary>
+        /// <param name="child"></param>
+        /// <returns></returns>
         protected GoalMachine.NotG Not(GoalMachine.IGoal child)
             => new GoalMachine.NotG(child);
 
+        /// <summary>
+        /// Waits for @child to complete and then reports Success regardless of @child status.
+        /// </summary>
+        /// <param name="child"></param>
+        /// <returns></returns>
         protected GoalMachine.IGoal Pass(GoalMachine.IGoal child)
             => Then(child, Ok());
 
+        /// <summary>
+        /// Waits for @child to complete and then reports Failure regardless of @child status.
+        /// </summary>
+        /// <param name="child"></param>
+        /// <returns></returns>
         protected GoalMachine.FailG Fail(GoalMachine.IGoal child = null)
             => new GoalMachine.FailG(child);
 
+        /// <summary>
+        /// Waits for @child to complete and then executes @after.
+        /// </summary>
+        /// <param name="child"></param>
+        /// <param name="after"></param>
+        /// <returns></returns>
         protected GoalMachine.IGoal After(GoalMachine.IGoal child, GoalMachine.IGoal after)
             => Then(child, after);
 
+        /// <summary>
+        /// Makes sure to execute @goal not now, but on any subsequent message and context that satisfies @pred.
+        /// </summary>
+        /// <param name="goal">Runs after @pred is successful. Reports Success if null.</param>
+        /// <param name="pred"></param>
+        /// <returns></returns>
         protected GoalMachine.NextMessageG NextMessage(GoalMachine.IGoal goal = null, Func<GoalMachine.IGoalContext, bool> pred = null)
             => new GoalMachine.NextMessageG(goal, pred);
 
+        /// <summary>
+        /// Makes sure to execute @goal not now, but on any subsequent message that satisfies @pred.
+        /// </summary>
+        /// <param name="pred"></param>
+        /// <param name="goal">Runs after @pred is successful. Reports Success if null.</param>
+        /// <returns></returns>
         protected GoalMachine.NextMessageG NextMessage(Func<object, bool> pred, GoalMachine.IGoal goal = null)
             => NextMessage(goal, ctx => pred(ctx.CurrentMessage));
 
+        /// <summary>
+        /// Makes sure to execute @goal not now, but on any subsequent message that is if type {T}
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="goal">Reports Success if null</param>
+        /// <returns></returns>
         protected GoalMachine.NextMessageG NextMessage<T>(GoalMachine.IGoal goal = null)
             => NextMessage(goal, ctx => ctx.CurrentMessage is T);
 
+        /// <summary>
+        /// Makes sure to execute @goal not now, but on any subsequent message that is if type {T} and satisfies @pred
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="pred">Test against current message</param>
+        /// <param name="goal">Runs after @pred is successful. Reports Success if null.</param>
+        /// <returns></returns>
         protected GoalMachine.NextMessageG NextMessage<T>(Func<T, bool> pred, GoalMachine.IGoal goal = null)
             => NextMessage(goal, ctx => ctx.CurrentMessage is T && pred((T)ctx.CurrentMessage));
 
+        /// <summary>
+        /// Ensure that @pred is only checked once per message. When @pred is true, execute @goal.
+        /// </summary>
+        /// <param name="goal">Runs after @pred is successful. Reports Success if null.</param>
+        /// <param name="pred">Test against context</param>
+        /// <returns></returns>
         protected GoalMachine.OnMessageG OnMessage(GoalMachine.IGoal goal = null, Func<GoalMachine.IGoalContext, bool> pred = null)
             => new GoalMachine.OnMessageG(goal, pred);
 
+        /// <summary>
+        /// Ensure that @pred is only checked once per message. When @pred is true, execute @goal.
+        /// </summary>
+        /// <param name="pred">Test against current message</param>
+        /// <param name="goal">Runs after @pred is successful. Reports Success if null.</param>
+        /// <returns></returns>
         protected GoalMachine.OnMessageG OnMessage(Func<object, bool> pred, GoalMachine.IGoal goal = null)
             => OnMessage(goal, ctx => pred(ctx.CurrentMessage));
 
+        /// <summary>
+        /// Waits for message of type {T}. Then runs @goal.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="goal">Runs after message of type {T} arrives. Reports Success if null.</param>
+        /// <returns></returns>
         protected GoalMachine.OnMessageG OnMessage<T>(GoalMachine.IGoal goal = null)
             => OnMessage(goal, ctx => ctx.CurrentMessage is T);
 
+        /// <summary>
+        /// Ensure that @pred is only checked once per message of type {T}. When @pred is true, execute @goal.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="pred">Test against message of type {T}</param>
+        /// <param name="goal">Runs after @pred is successful. Reports Success if null</param>
+        /// <returns></returns>
         protected GoalMachine.OnMessageG OnMessage<T>(Func<T, bool> pred, GoalMachine.IGoal goal = null)
             => OnMessage(goal, ctx => ctx.CurrentMessage is T && pred((T)ctx.CurrentMessage));
 
+        /// <summary>
+        /// Run @child. Then run @then.
+        /// </summary>
+        /// <param name="child"></param>
+        /// <param name="then"></param>
+        /// <returns></returns>
         protected GoalMachine.ThenG Then(GoalMachine.IGoal child, GoalMachine.IGoal then)
             => new GoalMachine.ThenG(child, then);
 
+        /// <summary>
+        /// Run @child. If it does not complete within @delay, run @onTimeout.
+        /// </summary>
+        /// <param name="delay"></param>
+        /// <param name="child"></param>
+        /// <param name="onTimeout">Reports Failure if null.</param>
+        /// <returns></returns>
         protected GoalMachine.TimeoutG Timeout(TimeSpan delay, GoalMachine.IGoal child, GoalMachine.IGoal onTimeout = null)
             => new GoalMachine.TimeoutG(_ => delay, child, onTimeout ?? Fail());
 
+        /// <summary>
+        /// Dynamic delay selection. Run @child. If it does not complete within @delay, run @onTimeout.
+        /// </summary>
+        /// <param name="delay">This is run once to determine desired delay.</param>
+        /// <param name="child"></param>
+        /// <param name="onTimeout">Reports Failure if null.</param>
+        /// <returns></returns>
         protected GoalMachine.TimeoutG Timeout(Func<GoalMachine.IGoalContext, TimeSpan> delay, GoalMachine.IGoal child, GoalMachine.IGoal onTimeout = null)
             => new GoalMachine.TimeoutG(delay, child, onTimeout ?? Fail());
 
+        /// <summary>
+        /// A goal that never completes.
+        /// </summary>
+        /// <returns></returns>
         protected GoalMachine.NeverG Never()
             => new GoalMachine.NeverG();
 
+        /// <summary>
+        /// Wait @delay, then execute @after.
+        /// </summary>
+        /// <param name="delay"></param>
+        /// <param name="after">Reports Success if null.</param>
+        /// <returns></returns>
         protected GoalMachine.IGoal Delay(TimeSpan delay, GoalMachine.IGoal after = null)
             => Delay(_ => delay, after ?? Ok());
 
+        /// <summary>
+        /// Wait @delay(ctx), then execute @after.
+        /// </summary>
+        /// <param name="delay">This is run once to determine desired delay.</param>
+        /// <param name="after"></param>
+        /// <returns></returns>
         protected GoalMachine.IGoal Delay(Func<GoalMachine.IGoalContext, TimeSpan> delay, GoalMachine.IGoal after = null)
             => new GoalMachine.TimeoutG(delay, Never(), after ?? Ok());
 
+        /// <summary>
+        /// Instant Success.
+        /// </summary>
+        /// <returns></returns>
         protected GoalMachine.OkG Ok()
             => new GoalMachine.OkG();
 
-
+        /// <summary>
+        /// Must run this first. Submit all your goals in @goal. Initialize your user data with @data.
+        /// </summary>
+        /// <param name="goal"></param>
+        /// <param name="data"></param>
         protected void StartWith(GoalMachine.IGoal goal, TData data)
         {
             Machine = new GoalMachine(this, data);
             Machine.Run(goal);
         }
 
+        /// <summary>
+        /// Is responsible for running <see cref="IGoalContext"/>s in response to messages.
+        /// </summary>
         public class GoalMachine
         {
             private List<GoalContext> _contexts = new List<GoalContext>();
@@ -184,6 +452,10 @@ namespace Dagmatic.Akka.Actor
             public ulong MessageCount { get; private set; }
             public TData Data { get; }
 
+            /// <summary>
+            /// Increments <see cref="MessageCount"/>, sets <see cref="CurrentMessage"/> and runs <see cref="IGoalContext"/>s
+            /// </summary>
+            /// <param name="message"></param>
             public void ProcessMessage(object message)
             {
                 MessageCount++;
@@ -195,6 +467,10 @@ namespace Dagmatic.Akka.Actor
                 }
             }
 
+            /// <summary>
+            /// Wraps <see cref="goal"/> in <see cref="IGoalContext"/> and runs it.
+            /// </summary>
+            /// <param name="goal"></param>
             public void Run(IGoal goal)
             {
                 var context = new GoalContext(this, goal);
@@ -204,22 +480,74 @@ namespace Dagmatic.Akka.Actor
 
             public event EventHandler<IGoal> Failed;
 
+            /// <summary>
+            /// <see cref="IGoal"/> use this to express their behavior. Goal environment is reactive, in response to messages. 
+            /// Use properties and methods of this object to express goal behavior and to interact with outside world.
+            /// </summary>
             public interface IGoalContext
             {
+                /// <summary>
+                /// <see cref="GoalMachine"/> runs through goal contexts every time it receive a message. This is the message.
+                /// <see cref="GoalMachine"/> also runs first time when it's created. Then this message is null.
+                /// </summary>
                 object CurrentMessage { get; }
+                /// <summary>
+                /// Use this to schedule messages or to report failure.
+                /// </summary>
                 IMachineHost Host { get; }
+                /// <summary>
+                /// Use this to implement message sequencing logic.
+                /// </summary>
                 ulong MessageCount { get; }
-                IGoal Parent { get; }
+                /// <summary>
+                /// User defined data. Usually contains business logic.
+                /// </summary>
                 TData Data { get; }
+                /// <summary>
+                /// The view of goal children, indexed by position.
+                /// </summary>
                 IReadOnlyDictionary<int, IGoal> Children { get; }
+                /// <summary>
+                /// The view of goal child stats, indexed by position.
+                /// </summary>
                 IReadOnlyDictionary<int, GoalStatus> ChildStats { get; }
+                /// <summary>
+                /// Set this to report Success or Failure. Setting any other properties has no effect if this is set to Success and Failure.
+                /// </summary>
                 GoalStatus Status { get; set; }
+                /// <summary>
+                /// Set this to explain failure. If an exception occurs during <see cref="IGoal.Update"/>, it will be set here.
+                /// </summary>
                 object FailureReason { get; set; }
+                /// <summary>
+                /// Interacts with <see cref="ReplaceRoot"/>
+                /// </summary>
                 bool IsRoot { get; set; }
+                /// <summary>
+                /// Replace goal's children.
+                /// </summary>
+                /// <param name="children"></param>
                 void SetChildren(params IGoal[] children);
+                /// <summary>
+                /// Check self and parents until <see cref="IsRoot"/> is true or the context has no parent. Then set this goal and discard all other children.
+                /// </summary>
+                /// <param name="goal"></param>
                 void ReplaceRoot(IGoal goal);
+                /// <summary>
+                /// Replace current goal with this and discard all children.
+                /// </summary>
+                /// <param name="goal"></param>
                 void ReplaceSelf(IGoal goal);
+                /// <summary>
+                /// Add a child with <see cref="IsRoot"/> set to true.
+                /// </summary>
+                /// <param name="goal"></param>
                 void Spawn(IGoal goal);
+                /// <summary>
+                /// A convenience method that ensures the scheduled message will only be delivered to the goal that requested it.
+                /// </summary>
+                /// <param name="message"></param>
+                /// <param name="delay"></param>
                 void ScheduleMessage(object message, TimeSpan delay);
             }
 
@@ -302,7 +630,6 @@ namespace Dagmatic.Akka.Actor
 
                 public IMachineHost Host => _machine.Host;
                 public ulong MessageCount => _machine.MessageCount;
-                public IGoal Parent { get; }
                 public GoalContext ParentContext { get; }
                 public IGoal Goal { get; protected set; }
                 public TData Data { get; }
@@ -407,7 +734,15 @@ namespace Dagmatic.Akka.Actor
                 {
                     BeforeUpdate();
 
-                    Goal.Update(this);
+                    try
+                    {
+                        Goal.Update(this);
+                    }
+                    catch (Exception ex)
+                    {
+                        FailureReason = ex;
+                        Status = GoalStatus.Failure;
+                    }
 
                     if (FailureReason != null)
                     {
@@ -514,9 +849,25 @@ namespace Dagmatic.Akka.Actor
                 }
             }
 
+            /// <summary>
+            /// <see cref="IGoal"/> works with <see cref="IGoalContext"/> in its <see cref="Update"/> method to implement goal behavior. 
+            /// Goals start as Pending, and will have their Update method invoked until they report Success or Failure.
+            /// Goals are like <see cref="System.Threading.Tasks.Task"/>, but orders of magnitude more flexible.
+            /// </summary>
             public interface IGoal
             {
+                /// <summary>
+                /// Goals are reusable. This method is called before each re-use. (usually in cycles).
+                /// </summary>
                 void Initialize();
+                /// <summary>
+                /// The point of interaction with goal context. Set properties and call methods on <see cref="IGoalContext"/> to express goal behavior. 
+                /// <see cref="Update"/> is called when goal status is Pending and either
+                /// 1) Goal has just been initialized
+                /// 2) a new message comes
+                /// 3) a child goal completes (with Success or Failure).
+                /// </summary>
+                /// <param name="ctx"></param>
                 void Update(IGoalContext ctx);
             }
 
