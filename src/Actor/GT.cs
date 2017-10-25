@@ -36,6 +36,15 @@ namespace Dagmatic.Akka.Actor
             => new GoalMachine.FromActionFactoryG(() => ctx => ctx.ReplaceRoot(factory()));
 
         /// <summary>
+        /// Replace root (created by <see cref="Spawn"/>) with result of <see cref="factory"/>(<see cref="GoalMachine.IGoalContext"/>).
+        /// Internally, creates a goal to execute <see cref="GoalMachine.IGoalContext.ReplaceRoot"/>
+        /// </summary>
+        /// <param name="factory"></param>
+        /// <returns></returns>
+        protected GoalMachine.IGoal Become(Func<GoalMachine.IGoalContext, GoalMachine.IGoal> factory)
+            => new GoalMachine.FromActionFactoryG(() => ctx => ctx.ReplaceRoot(factory(ctx)));
+
+        /// <summary>
         /// This goal becomes root and possible target for <see cref="Become"/>
         /// </summary>
         /// <param name="goal"></param>
